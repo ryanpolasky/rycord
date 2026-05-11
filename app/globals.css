@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..800;1,9..144,300..800&family=Cormorant+Garamond:ital,wght@0,300..700;1,300..700&family=Inter:wght@300..600&display=swap");
+
+/* "rainy cafe" palette — warm, cozy, dusty.
+   intentionally distinct from rylive's dark-industrial. */
+:root {
+  --bg: #e8dfd0;        /* oat / aged paper */
+  --bg-deep: #d4c9b6;   /* dusty cream */
+  --ink: #2d251c;       /* espresso */
+  --ink-soft: #5a4b3a;  /* warm taupe */
+  --rose: #c08c83;      /* dusty rose */
+  --sage: #92a48a;      /* dried sage */
+  --gold: #b88752;      /* lamp gold */
+  --paper: #f0e7d6;     /* tea-stained */
+}
+
+html, body, #__next {
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+
+body {
+  overscroll-behavior: none;
+}
+
+.serif {
+  font-family: "Fraunces", "Cormorant Garamond", ui-serif, serif;
+  font-feature-settings: "ss01" on, "ss03" on;
+}
+
+.book {
+  font-family: "Cormorant Garamond", "Fraunces", ui-serif, serif;
+}
+
+/* Subtle scrollbar styling for in-panel scroll regions (the notes section
+   in the InfoPanel). Reads as "barely there" — a thin warm-grey thumb
+   only when actively scrolled, no track gutter. */
+.rycord-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(90, 75, 58, 0.25) transparent;
+}
+.rycord-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.rycord-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.rycord-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(90, 75, 58, 0.22);
+  border-radius: 999px;
+}
+.rycord-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(90, 75, 58, 0.45);
+}
