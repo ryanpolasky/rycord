@@ -45,13 +45,13 @@ See `.env.example` for the full commented list.
 Normal app loads read local cache first. Rycord only calls upstream APIs when a
 needed cache file does not exist yet.
 
-| path                    | contents                                      |
-|-------------------------|-----------------------------------------------|
-| `data/collections/*.json` | Normalized collection entries and raw Discogs rows |
-| `data/releases/*.json`    | Release metadata, notes, tracklist, durations, raw payload |
-| `data/descriptions/*.json` | Wikipedia, Last.fm, or OpenRouter description payloads |
-| `data/palettes/*.json`    | Derived cover palettes                       |
-| `data/covers/*`           | Proxied cover image binaries and metadata    |
+| path                       | contents                                                   |
+|----------------------------|------------------------------------------------------------|
+| `data/collections/*.json`  | Normalized collection entries and raw Discogs rows         |
+| `data/releases/*.json`     | Release metadata, notes, tracklist, durations, raw payload |
+| `data/descriptions/*.json` | Wikipedia, Last.fm, or OpenRouter description payloads     |
+| `data/palettes/*.json`     | Derived cover palettes                                     |
+| `data/covers/*`            | Proxied cover image binaries and metadata                  |
 
 Description lookup order is:
 
@@ -138,3 +138,9 @@ lib/
 - One configured collection at a time
 - One room theme
 - No audio playback
+
+### note from ryan
+I know the commit history is short - I have a bad habit of writing wild commit messages on projects when I don't think 
+they'll go live. This one turned out nicely though, and I wanted to share it. Thus, I went ahead and squashed the 
+commits down to just the few you see. Apologies if you wanted to see my process of iterating for some reason. Check my 
+other projects out for that.
