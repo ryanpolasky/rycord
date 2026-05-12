@@ -134,15 +134,23 @@ export default function Scene({
   const toggleTurntableFocus = () => {
     // If a record is currently pulled out, retract it first so the
     // camera's follow-through doesn't fight the InfoPanel slide-out.
+    // Any picked-up UI (remote, paper) also gets put down — the camera
+    // is about to dolly in on the player and the foreground prop would
+    // either fly out of frame or block the view.
     if (activeId) clearActiveRecord();
     if (focusedArt) setFocusedArt(null);
+    if (ledState.remoteOpen) setRemoteOpen(false);
     if (ledState.paperOpen) setPaperOpen(false);
     setTurntableFocused((v) => !v);
   };
 
   const toggleWallArtFocus = (which: "left" | "right") => {
+    // Same reasoning as toggleTurntableFocus: anything held in the
+    // foreground gets dismissed so the wall-art closeup has the
+    // viewport to itself.
     if (activeId) clearActiveRecord();
     if (turntableFocused) setTurntableFocused(false);
+    if (ledState.remoteOpen) setRemoteOpen(false);
     if (ledState.paperOpen) setPaperOpen(false);
     setFocusedArt((v) => (v === which ? null : which));
   };

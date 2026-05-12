@@ -139,6 +139,16 @@ export default function Turntable({
   const changeAnimRef = useRef({ active: false, start: 0, fromRot: 0, toRot: 0 });
   const changeTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const prevTrackKeyRef = useRef<string | null | undefined>(undefined);
+  // Whether the previous nowPlaying state was actively playing. Needed
+  // because the in-scene arm has TWO valid "out of the way" poses during a
+  // swap: from-rest (arm stays parked at the cradle) vs mid-song (arm
+  // lifts and swings to the CLEAR pose so the flipping record has room).
+  // Without tracking this we'd always target CLEAR, which yanks the arm
+  // visibly upward + outward when transitioning from the idle/parked
+  // position — exactly the unwanted "arm goes back up" wiggle the user
+  // would otherwise see on the very first song after page load.
+  const prevIsPlayingRef = useRef<boolean | undefined>(undefined);
+  const fromRestRef = useRef(false);
   const recordRestRotRef = useRef(0);
   const changeGenerationRef = useRef(0);
   const pendingSwapTextureRef = useRef<THREE.Texture | null>(null);
@@ -167,13 +177,17 @@ export default function Turntable({
 
   useEffect(() => {
     const previous = prevTrackKeyRef.current;
+    const previousIsPlaying = prevIsPlayingRef.current ?? false;
+    const isCurrentlyPlaying = Boolean(nowPlaying?.isPlaying);
     if (previous === undefined) {
       prevTrackKeyRef.current = trackKey;
+      prevIsPlayingRef.current = isCurrentlyPlaying;
       setDisplayedArtUrl(incomingArtUrl);
       return;
     }
 
     if (previous === trackKey) {
+      prevIsPlayingRef.current = isCurrentlyPlaying;
       if (!nowPlaying?.isPlaying) {
         changeGenerationRef.current += 1;
         pendingSwapTextureRef.current?.dispose();
@@ -188,6 +202,7 @@ export default function Turntable({
     }
 
     prevTrackKeyRef.current = trackKey;
+    prevIsPlayingRef.current = isCurrentlyPlaying;
     const generation = ++changeGenerationRef.current;
     pendingSwapTextureRef.current?.dispose();
     pendingSwapTextureRef.current = null;
@@ -200,6 +215,20 @@ export default function Turntable({
       setDisplayedArtUrl(incomingArtUrl);
       return;
     }
+
+    // Set the changing flag IMMEDIATELY so useFrame's groove-walking branch
+    // can't briefly drive the arm toward TONEARM_DOWN_Z during the
+    // texture-preload window below. Without this, trackStartRef gets set
+    // synchronously by the OTHER effect when isPlaying flips true, while
+    // changingRef stays false until the .then() callback fires — and during
+    // that gap the arm visibly dips down before snapping back up to CLEAR.
+    //
+    // Also capture whether we're coming from idle. From rest the arm is
+    // already parked at the cradle (REST/LIFTED), so moving to CLEAR is
+    // unnecessary motion the user reads as a wiggle — keep it at REST
+    // through the flip and let it land directly on the groove after.
+    changingRef.current = true;
+    fromRestRef.current = !previousIsPlaying;
 
     const startChange = (preloadedTex: THREE.Texture | null) => {
       if (generation !== changeGenerationRef.current) {
@@ -373,9 +402,16 @@ export default function Turntable({
     }
 
     // Tonearm target: resting/lifted when not playing, or sweeping inward
-    // based on elapsed/duration while the song plays.
-    let targetY = changingRef.current ? TONEARM_CLEAR_Y : TONEARM_REST_Y;
-    let targetZ = changingRef.current ? TONEARM_CLEAR_Z : TONEARM_LIFTED_Z;
+    // based on elapsed/duration while the song plays. During a record swap
+    // the target depends on where we're coming from:
+    //   - mid-song change → CLEAR pose (arm pulls back farther/lifts higher
+    //     so the flipping record has clearance)
+    //   - rest → song    → keep the arm parked at REST. It's already out of
+    //     the way at the cradle, and any extra motion reads as a wiggle.
+    const swapY = fromRestRef.current ? TONEARM_REST_Y : TONEARM_CLEAR_Y;
+    const swapZ = fromRestRef.current ? TONEARM_LIFTED_Z : TONEARM_CLEAR_Z;
+    let targetY = changingRef.current ? swapY : TONEARM_REST_Y;
+    let targetZ = changingRef.current ? swapZ : TONEARM_LIFTED_Z;
     if (!changingRef.current && trackStartRef.current !== null && durationRef.current > 0) {
       const elapsed = Date.now() - trackStartRef.current;
       // Clamp progress to [0, 1]; if the upstream hasn't refreshed yet and
