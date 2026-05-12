@@ -103,6 +103,14 @@ const CLOSE_HANDOFF_P = 0.18;
 // (cover front) to world +Z (toward camera).
 const FRONT_FACE_Y = -Math.PI / 2;
 
+// Shared jacket geometry. Every record has the EXACT same box dimensions
+// (SX × SY × SZ), so it would be wasteful for R3F to allocate a separate
+// BufferGeometry per <VinylRecord/> instance. With ~16-50 records, sharing
+// one BoxGeometry across all of them saves 15-49 redundant geometry
+// uploads to the GPU and corresponding allocations in JS-land. Materials
+// stay per-instance (each record has unique cover/spine/back maps).
+const JACKET_GEOMETRY = new THREE.BoxGeometry(SX, SY, SZ);
+
 type Props = {
   rec: DemoRecord;
   shelfX: number;
@@ -296,6 +304,28 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
     if (!group.current) return;
     const dt = Math.min(rawDt, 0.05);
     const t = state.clock.elapsedTime;
+
+    // Idle early-out: when this record is fully nested in the shelf,
+    // unhovered, inactive, AND all its spring state has fully settled, the
+    // entire body below is a no-op against the existing position/rotation.
+    // Skipping it costs only a few comparisons but saves the spring math +
+    // group.position.set / spin integration on every other record that
+    // isn't actively being interacted with. With a 50-record shelf this is
+    // ~49 records doing nothing every frame.
+    if (
+      !active &&
+      !hover &&
+      !closing.current &&
+      pullState.current.p < 0.001 &&
+      Math.abs(pullState.current.v) < 0.001 &&
+      hoverState.current.p < 0.001 &&
+      Math.abs(hoverState.current.v) < 0.001 &&
+      Math.abs(spinAngle.current) < 0.001 &&
+      Math.abs(spinVel.current) < 0.001 &&
+      commandedSpinTarget.current === null
+    ) {
+      return;
+    }
 
     // Track open / closing transitions. We "close" through an explicit
     // spin-down phase (see below) before retracting position.
@@ -547,8 +577,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
         window.addEventListener("pointercancel", onUp);
       }}
     >
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[SX, SY, SZ]} />
+      <mesh castShadow receiveShadow geometry={JACKET_GEOMETRY}>
         {/* Face order: +X cover front, -X cover back, +Y top edge, -Y bot edge,
             +Z spine (faces camera at rest), -Z back of spine (toward back wall). */}
         <meshStandardMaterial attach="material-0" map={coverMap} roughness={0.55} metalness={0.04} />

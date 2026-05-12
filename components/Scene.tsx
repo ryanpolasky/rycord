@@ -404,7 +404,12 @@ export default function Scene({
     >
       <Canvas
         shadows
-        dpr={[1, 2]}
+        // DPR capped at 1.5: 2× on retina renders 4× the pixels of 1×,
+        // which doubles shadow map + bloom fragment work for an effect
+        // very few users can actually distinguish. 1.5× is the sweet spot —
+        // visually indistinguishable from 2× at normal viewing distance,
+        // ~30% less pixel work on retina laptops.
+        dpr={[1, 1.5]}
         camera={{ position: [0.05, 0.52, 1.05], fov: BASE_FOV, near: 0.01, far: 50 }}
         gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.6 }}
         onPointerMissed={() => {
@@ -648,6 +653,25 @@ function IdleCamera({
     artBlend: 0, vArtBlend: 0,
   });
 
+  // Persistent scratch vectors so useFrame doesn't allocate per-frame. The
+  // camera-rig logic blends up to four poses (front, side, turntable, art)
+  // and previously did `new THREE.Vector3(...)` + `.clone().lerp(...)` for
+  // each, racking up 6–14 allocs/frame → ~360–840 allocs/sec at 60fps. The
+  // GC pressure showed up as periodic micro-stutters during camera drift.
+  // Now we `.set()` into these once-allocated vectors and `.lerp()` in place.
+  const scratch = useRef({
+    frontPos: new THREE.Vector3(),
+    frontLook: new THREE.Vector3(),
+    sidePos: new THREE.Vector3(),
+    sideLook: new THREE.Vector3(),
+    ttClosePos: new THREE.Vector3(),
+    ttCloseLook: new THREE.Vector3(),
+    artClosePos: new THREE.Vector3(),
+    artCloseLook: new THREE.Vector3(),
+    finalPos: new THREE.Vector3(),
+    finalLook: new THREE.Vector3(),
+  });
+
   // Side-view forces the user into a foreshortened pose that's great for
   // peeking down rows of spines but awful for actually reading a pulled-out
   // album. So: any time a record IS active, we force scrollDolly to 0
@@ -804,14 +828,16 @@ function IdleCamera({
     const sideBlend = Math.max(0, Math.min(1, (-0.35 - o.dollyZ) / 0.65));
 
     // Front pose (sideBlend = 0): camera near the front of the shelf,
-    // looking at its center.
+    // looking at its center. All pose vectors are pre-allocated scratch
+    // (see `scratch` ref above); we `.set()` them in place every frame.
+    const sc = scratch.current;
     const sway = active ? 0.008 : 0.022;
-    const frontPos = new THREE.Vector3(
+    sc.frontPos.set(
       dolly.x + o.x + o.parX + Math.sin(t * 0.18) * sway,
       dolly.y + o.y + o.parY + Math.cos(t * 0.13) * sway * 0.5,
       1.05 + o.z + o.dollyZ,
     );
-    const frontLook = new THREE.Vector3(
+    sc.frontLook.set(
       o.lookX + o.parX * 0.5,
       lookYBase + o.lookY + o.parY * 0.4,
       0,
@@ -830,19 +856,21 @@ function IdleCamera({
     // much, you can scan across them comfortably, AND the front-cover
     // peek on hover still reads clearly.
     const shelfRightEdge = cols * 0.5 * 0.33 + 0.28;     // SHELF_CELL ≈ 0.33m
-    const sidePos = new THREE.Vector3(
+    sc.sidePos.set(
       shelfRightEdge + o.parX * 0.5,
       dolly.y * 0.95 + o.parY,
       0.5 + o.z * 0.3,
     );
-    const sideLook = new THREE.Vector3(
+    sc.sideLook.set(
       -0.05 + o.parX * 0.3,
       lookYBase * 0.9 + o.parY * 0.4,
       0.05,
     );
 
-    const shelfPos = frontPos.clone().lerp(sidePos, sideBlend);
-    const shelfLook = frontLook.clone().lerp(sideLook, sideBlend);
+    // Compose the shelf-pose blend directly into finalPos/finalLook — the
+    // turntable and art blends will then layer on top in place.
+    sc.finalPos.copy(sc.frontPos).lerp(sc.sidePos, sideBlend);
+    sc.finalLook.copy(sc.frontLook).lerp(sc.sideLook, sideBlend);
 
     // Turntable closeup pose: hovering ~22cm above the platter and ~35cm
     // in front of it, angled down at ~32° so you see the platter top,
@@ -850,22 +878,20 @@ function IdleCamera({
     // frame. Parallax is retained at a reduced amplitude so the view
     // still breathes without knocking the closeup out of alignment.
     const ttBlend = o.ttBlend;
-    let finalPos = shelfPos;
-    let finalLook = shelfLook;
     if (ttBlend > 0.0005) {
       const ttSway = 0.005;
-      const ttClosePos = new THREE.Vector3(
+      sc.ttClosePos.set(
         turntablePos[0] + o.parX * 0.25 + Math.sin(t * 0.22) * ttSway,
         turntablePos[1] + 0.28 + o.parY * 0.15 + Math.cos(t * 0.17) * ttSway * 0.5,
         turntablePos[2] + 0.35,
       );
-      const ttCloseLook = new THREE.Vector3(
+      sc.ttCloseLook.set(
         turntablePos[0] + o.parX * 0.08,
         turntablePos[1] + 0.06 + o.parY * 0.08,
         turntablePos[2],
       );
-      finalPos = shelfPos.clone().lerp(ttClosePos, ttBlend);
-      finalLook = shelfLook.clone().lerp(ttCloseLook, ttBlend);
+      sc.finalPos.lerp(sc.ttClosePos, ttBlend);
+      sc.finalLook.lerp(sc.ttCloseLook, ttBlend);
     }
 
     const artBlend = o.artBlend;
@@ -883,22 +909,22 @@ function IdleCamera({
       // left painting gets cropped/zoomed in too tight while the right
       // painting reads as intended.
       const artCameraZ = artTarget === "left" ? 0.75 : 0.46;
-      const artClosePos = new THREE.Vector3(
+      sc.artClosePos.set(
         artX + (artTarget === "left" ? 0.02 : -0.02) + o.parX * 0.12,
         artY + 0.02 + o.parY * 0.08,
         artZ + artCameraZ,
       );
-      const artCloseLook = new THREE.Vector3(
+      sc.artCloseLook.set(
         artX,
         artY,
         artZ,
       );
-      finalPos = finalPos.clone().lerp(artClosePos, artBlend);
-      finalLook = finalLook.clone().lerp(artCloseLook, artBlend);
+      sc.finalPos.lerp(sc.artClosePos, artBlend);
+      sc.finalLook.lerp(sc.artCloseLook, artBlend);
     }
 
-    camera.position.copy(finalPos);
-    camera.lookAt(finalLook);
+    camera.position.copy(sc.finalPos);
+    camera.lookAt(sc.finalLook);
 
     // FOV zoom — only active when a record is pulled out. Smoothly chases
     // the user's zoomT (0..1) toward ZOOM_MIN_FOV; when no record is

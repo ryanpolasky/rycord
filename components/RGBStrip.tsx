@@ -57,6 +57,20 @@ export default function RGBStrip({
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const colorScratch = useMemo(() => new THREE.Color(), []);
 
+  // Snapshot of the last paint so we can skip the per-LED loop when nothing
+  // has changed AND the active pattern doesn't need a time-axis update. With
+  // 32-160 LEDs per strip this is the single largest per-frame allocation in
+  // the scene by call count. `static`/disabled patterns repaint exactly once
+  // after a state change and then idle at zero cost; time-dependent patterns
+  // (breath, chase, rainbow, strobes, etc.) keep painting every frame.
+  const lastPaintRef = useRef({
+    pattern: "" as string,
+    enabled: false,
+    color: "",
+    intensity: 0,
+    initialized: false,
+  });
+
   useEffect(() => {
     if (!ref.current) return;
     const startX = -length / 2 + slot / 2;
@@ -73,7 +87,27 @@ export default function RGBStrip({
   useFrame((sceneState) => {
     if (!ref.current) return;
     const t = sceneState.clock.elapsedTime;
-    const { pattern, enabled } = getLedState();
+    const ledState = getLedState();
+    const { pattern, enabled, color, intensity } = ledState;
+
+    // Time-axis dependence: every pattern except `static` animates over t.
+    // When disabled we treat the strip as static-off (one final paint to
+    // black, then nothing more until something changes).
+    const isTimeDependent = enabled && pattern !== "static";
+
+    const last = lastPaintRef.current;
+    const stateChanged =
+      !last.initialized ||
+      last.pattern !== pattern ||
+      last.enabled !== enabled ||
+      last.color !== color ||
+      last.intensity !== intensity;
+
+    // Skip the entire paint + light update if nothing changed AND the
+    // pattern doesn't need temporal updates. This is the hot path when the
+    // user has the strip on a solid color or off — the loop was burning
+    // 32-160 setColorAt() calls every frame for no visible benefit.
+    if (!stateChanged && !isTimeDependent) return;
 
     // recompute color for every LED this frame
     for (let i = 0; i < count; i++) {
@@ -91,20 +125,26 @@ export default function RGBStrip({
       if (!enabled) {
         lightA.current.intensity = 0;
         lightB.current.intensity = 0;
-        return;
-      }
-      const sampleA = Math.floor(count * 0.25);
-      const sampleB = Math.floor(count * 0.75);
-      evalPattern(colorScratch, sampleA, count, t, pattern);
-      const iA = colorScratch.r + colorScratch.g + colorScratch.b;
-      lightA.current.color.set(colorScratch.r / Math.max(iA, 0.01), colorScratch.g / Math.max(iA, 0.01), colorScratch.b / Math.max(iA, 0.01));
-      lightA.current.intensity = Math.min(iA, 3) * 0.35 * lightMultiplier;
+      } else {
+        const sampleA = Math.floor(count * 0.25);
+        const sampleB = Math.floor(count * 0.75);
+        evalPattern(colorScratch, sampleA, count, t, pattern);
+        const iA = colorScratch.r + colorScratch.g + colorScratch.b;
+        lightA.current.color.set(colorScratch.r / Math.max(iA, 0.01), colorScratch.g / Math.max(iA, 0.01), colorScratch.b / Math.max(iA, 0.01));
+        lightA.current.intensity = Math.min(iA, 3) * 0.35 * lightMultiplier;
 
-      evalPattern(colorScratch, sampleB, count, t, pattern);
-      const iB = colorScratch.r + colorScratch.g + colorScratch.b;
-      lightB.current.color.set(colorScratch.r / Math.max(iB, 0.01), colorScratch.g / Math.max(iB, 0.01), colorScratch.b / Math.max(iB, 0.01));
-      lightB.current.intensity = Math.min(iB, 3) * 0.35 * lightMultiplier;
+        evalPattern(colorScratch, sampleB, count, t, pattern);
+        const iB = colorScratch.r + colorScratch.g + colorScratch.b;
+        lightB.current.color.set(colorScratch.r / Math.max(iB, 0.01), colorScratch.g / Math.max(iB, 0.01), colorScratch.b / Math.max(iB, 0.01));
+        lightB.current.intensity = Math.min(iB, 3) * 0.35 * lightMultiplier;
+      }
     }
+
+    last.pattern = pattern;
+    last.enabled = enabled;
+    last.color = color;
+    last.intensity = intensity;
+    last.initialized = true;
   });
 
   return (

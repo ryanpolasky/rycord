@@ -16,12 +16,26 @@ import * as THREE from "three";
 // The rain-shadow swipe (translucent ripple plane on the wall) lives in
 // Scene.tsx because it's a mesh; this file is lights only.
 
+// All the oscillators below are slow (<1Hz on average, fastest is 9Hz on the
+// lamp's micro-wobble). Updating their intensities every frame at 60fps is
+// wasteful — the human eye can't distinguish a smooth 60fps sine from a
+// 20fps stepped one at these frequencies. Throttling the body of useFrame
+// to ~20fps (every ~50ms) gives us a 3× reduction in light-update work
+// without any perceptible difference to the room's "breathing" feel.
+const LIGHTS_UPDATE_INTERVAL = 1 / 20;
+
 export default function Lights() {
   const lamp = useRef<THREE.PointLight>(null);
   const lampFill = useRef<THREE.PointLight>(null);
   const key = useRef<THREE.DirectionalLight>(null);
+  // Accumulator for the 20fps throttle. We hold off applying the next
+  // intensity update until at least LIGHTS_UPDATE_INTERVAL has elapsed.
+  const accum = useRef(0);
 
-  useFrame((state) => {
+  useFrame((state, rawDt) => {
+    accum.current += Math.min(rawDt, 0.1);
+    if (accum.current < LIGHTS_UPDATE_INTERVAL) return;
+    accum.current = 0;
     const t = state.clock.elapsedTime;
 
     // Warm lamp — incandescent flicker (slow + a tiny faster wobble)
@@ -44,15 +58,17 @@ export default function Lights() {
 
   return (
     <>
-      {/* dim cool rainy-window fill */}
+      {/* dim cool rainy-window fill. Shadow map at 1024² — the previous
+          2048² was overkill for a sub-1m room and quadrupled the shadow
+          fragment work every frame for no visible gain. */}
       <directionalLight
         ref={key}
         position={[-2.2, 2.0, 1.4]}
         intensity={0.32}
         color="#b8c1d0"
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
         shadow-camera-near={0.1}
         shadow-camera-far={12}
         shadow-camera-left={-4}
@@ -64,7 +80,12 @@ export default function Lights() {
       />
 
       {/* warm lamp from off-camera right — closer to the shelf so the cell
-          interior gets lit. This is the "cozy" centerpiece light. */}
+          interior gets lit. This is the "cozy" centerpiece light.
+          NOTE: castShadow intentionally OMITTED here. PointLight shadow
+          maps require a cube map (6 faces), so enabling shadows on this
+          light alone costs 6× a directional. The DirectionalLight key
+          above already handles the room's primary shadow language; the
+          lamp's role is warmth/glow, not silhouette definition. */}
       <pointLight
         ref={lamp}
         position={[0.55, 0.0, 0.35]}
@@ -72,10 +93,6 @@ export default function Lights() {
         color="#f5a655"
         distance={1.8}
         decay={1.35}
-        castShadow
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
-        shadow-bias={-0.001}
       />
 
       {/* warm fill from front-left — bouncing off facing pages */}

@@ -9,9 +9,16 @@ import * as THREE from "three";
 
 const COUNT = 60;
 
+// Dust drift is intentionally slow (per-mote speeds top out at ~0.12 rad/s),
+// so a smooth 60fps update is wasted budget on this many particles. Cap at
+// ~30fps: the eye reads slow particle drift just as cleanly at 30 as 60,
+// but we halve the per-frame matrix-write work + instanceMatrix uploads.
+const DUST_UPDATE_INTERVAL = 1 / 30;
+
 export default function DustMotes() {
   const mesh = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
+  const accum = useRef(0);
   const seeds = useMemo(() => {
     return Array.from({ length: COUNT }, () => ({
       x: (Math.random() - 0.5) * 1.0,
@@ -23,8 +30,11 @@ export default function DustMotes() {
     }));
   }, []);
 
-  useFrame((state) => {
+  useFrame((state, rawDt) => {
     if (!mesh.current) return;
+    accum.current += Math.min(rawDt, 0.1);
+    if (accum.current < DUST_UPDATE_INTERVAL) return;
+    accum.current = 0;
     const t = state.clock.elapsedTime;
     for (let i = 0; i < COUNT; i++) {
       const s = seeds[i];
