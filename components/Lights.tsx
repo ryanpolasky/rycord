@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import type { PerformanceTier } from "@/lib/performance";
 
 // All the room lighting in one place, with subtle animation so the scene
 // reads as "alive" not "baked." Cozy moody mix:
@@ -24,7 +25,7 @@ import * as THREE from "three";
 // without any perceptible difference to the room's "breathing" feel.
 const LIGHTS_UPDATE_INTERVAL = 1 / 20;
 
-export default function Lights() {
+export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
   const lamp = useRef<THREE.PointLight>(null);
   const lampFill = useRef<THREE.PointLight>(null);
   const key = useRef<THREE.DirectionalLight>(null);
@@ -40,19 +41,22 @@ export default function Lights() {
 
     // Warm lamp — incandescent flicker (slow + a tiny faster wobble)
     if (lamp.current) {
+      const lampBase = tier === "low" ? 2.15 : 1.75;
       const slow = Math.sin(t * 0.55) * 0.08;
       const fast = Math.sin(t * 4.3 + 1.5) * 0.03 + Math.sin(t * 9.1 + 0.3) * 0.014;
-      lamp.current.intensity = 1.75 + slow + fast;
+      lamp.current.intensity = lampBase + slow + fast;
       lamp.current.position.x = 0.55 + Math.sin(t * 0.3) * 0.012;
     }
 
     if (lampFill.current) {
-      lampFill.current.intensity = 0.4 + Math.sin(t * 0.55 + 1.3) * 0.05;
+      const fillBase = tier === "low" ? 0.55 : tier === "medium" ? 0.25 : 0.4;
+      lampFill.current.intensity = fillBase + Math.sin(t * 0.55 + 1.3) * 0.05;
     }
 
     if (key.current) {
       // rainy-window key — almost just a fill now, slow cloud pulse
-      key.current.intensity = 0.32 + Math.sin(t * 0.18) * 0.07 + Math.sin(t * 0.07) * 0.04;
+      const keyBase = tier === "low" ? 0.48 : 0.32;
+      key.current.intensity = keyBase + Math.sin(t * 0.18) * 0.07 + Math.sin(t * 0.07) * 0.04;
     }
   });
 
@@ -64,11 +68,11 @@ export default function Lights() {
       <directionalLight
         ref={key}
         position={[-2.2, 2.0, 1.4]}
-        intensity={0.32}
+        intensity={tier === "low" ? 0.48 : 0.32}
         color="#b8c1d0"
-        castShadow
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
+        castShadow={tier !== "low"}
+        shadow-mapSize-width={tier === "high" ? 1024 : 512}
+        shadow-mapSize-height={tier === "high" ? 1024 : 512}
         shadow-camera-near={0.1}
         shadow-camera-far={12}
         shadow-camera-left={-4}
@@ -89,7 +93,7 @@ export default function Lights() {
       <pointLight
         ref={lamp}
         position={[0.55, 0.0, 0.35]}
-        intensity={1.75}
+        intensity={tier === "low" ? 2.15 : 1.75}
         color="#f5a655"
         distance={1.8}
         decay={1.35}
@@ -99,20 +103,22 @@ export default function Lights() {
       <pointLight
         ref={lampFill}
         position={[-0.45, 0.0, 0.4]}
-        intensity={0.4}
+        intensity={tier === "low" ? 0.55 : tier === "medium" ? 0.25 : 0.4}
         color="#f4cc92"
-        distance={1.1}
+        distance={tier === "low" ? 1.6 : 1.1}
         decay={1.5}
       />
 
       {/* a tiny rim from the upper-left, like a wall sconce */}
-      <pointLight
-        position={[-1.1, 0.55, 0.4]}
-        intensity={0.32}
-        color="#e8b06a"
-        distance={1.8}
-        decay={1.4}
-      />
+      {tier === "high" && (
+        <pointLight
+          position={[-1.1, 0.55, 0.4]}
+          intensity={0.32}
+          color="#e8b06a"
+          distance={1.8}
+          decay={1.4}
+        />
+      )}
 
       {/* Warm hemisphere fill — lifts the floor evenly across its full extent
           so we don't get the dark-edge / bright-under-the-rug split caused by
@@ -122,10 +128,10 @@ export default function Lights() {
           which preserves the moody contrast on the wall behind the shelf.
           Sky color matches the floor's wood tone so the fill reads as
           "ambient wood bounce" rather than an obvious extra lamp. */}
-      <hemisphereLight color="#8c5d3e" groundColor="#0e0805" intensity={0.55} />
+      <hemisphereLight color="#a47450" groundColor="#1a0f08" intensity={tier === "low" ? 1.05 : 0.55} />
 
       {/* very dim warm ambient — just enough so deep shadows aren't pure black */}
-      <ambientLight intensity={0.14} color="#e8c89a" />
+      <ambientLight intensity={tier === "low" ? 0.36 : 0.14} color="#f0d2a2" />
     </>
   );
 }

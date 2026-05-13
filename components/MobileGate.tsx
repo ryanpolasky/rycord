@@ -1,14 +1,10 @@
 "use client";
 
-// Full-viewport "rycord is best on desktop" splash. Shown by SceneLoader
-// instead of mounting the (heavy, mouse-driven) 3D scene when we detect a
-// coarse-pointer device or a narrow viewport. There is no in-UI bypass —
-// the scene relies on a precise pointer and is genuinely unusable on
-// touch, so we hard-gate mobile rather than offering a "continue anyway"
-// path that leads to a broken experience. A hidden ?force=1 URL flag
-// (see SceneLoader) remains for QA from a coarse-pointer dev device.
+type Props = {
+  onContinue: () => void;
+};
 
-export default function MobileGate() {
+export default function MobileGate({ onContinue }: Props) {
   return (
     <main className="fixed inset-0 flex items-center justify-center bg-bg px-6 py-10 text-ink">
       <div className="w-full max-w-md text-center">
@@ -26,8 +22,15 @@ export default function MobileGate() {
           leans on a mouse and a real screen.
         </p>
         <p className="mt-3 text-sm leading-relaxed text-inkSoft/80">
-          come back on a laptop. it&rsquo;s worth it.
+          it&rsquo;s better on a laptop, but you can continue anyway. mobile starts in low quality.
         </p>
+        <button
+          type="button"
+          onClick={onContinue}
+          className="mt-8 rounded-full border border-inkSoft/25 bg-ink/90 px-5 py-2.5 font-sans text-[10px] uppercase tracking-[0.28em] text-paper shadow-[0_18px_40px_rgba(45,37,28,0.18)] transition hover:bg-ink hover:shadow-[0_22px_50px_rgba(45,37,28,0.24)]"
+        >
+          continue anyway
+        </button>
       </div>
     </main>
   );

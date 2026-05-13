@@ -32,6 +32,7 @@ import HoverTooltip from "./HoverTooltip";
 import { clearHover, muteHoverFor, setHoverPos } from "@/lib/hoverStore";
 import type { HoverNote } from "@/lib/hoverStore";
 import { useNowPlaying } from "@/lib/nowPlaying";
+import { tierDpr, usePerformanceTier, type PerformanceMode, type PerformanceTier } from "@/lib/performance";
 
 const MAX_COLS = 5;
 
@@ -41,6 +42,9 @@ const MAX_COLS = 5;
 const BASE_FOV = 36;
 const ZOOM_MIN_FOV = 18;
 type WallArtFocus = "left" | "right" | null;
+const QUALITY_MODES: PerformanceMode[] = ["auto", "low", "medium", "high"];
+type LibraryMode = "collection" | "wantlist";
+type WantlistStatus = "idle" | "loading" | "ready" | "error";
 
 // Which cell, if any, holds the turntable when the shelf is multi-row?
 // On a multi-row unit the turntable lives INSIDE one cell — dead center
@@ -74,6 +78,9 @@ type Props = {
     left?: HoverNote;
     right?: HoverNote;
   };
+  wantlistRecords?: DemoRecord[];
+  wantlistStatus?: WantlistStatus;
+  onWantlistRequest?: () => void | Promise<void>;
   onReady?: () => void;
 };
 
@@ -83,10 +90,14 @@ export default function Scene({
   source = "demo",
   wallArtUrls,
   wallArtNotes,
+  wantlistRecords = [],
+  wantlistStatus = "idle",
+  onWantlistRequest,
   onReady,
 }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [flipRequest, setFlipRequest] = useState({ recordId: "", signal: 0 });
+  const [libraryMode, setLibraryMode] = useState<LibraryMode>("collection");
   const pendingActiveIdRef = useRef<string | null>(null);
   const ledState = useLedState();
   // Polled Ryan-is-currently-listening state from /api/nowplaying. Drives
@@ -99,6 +110,9 @@ export default function Scene({
   const [turntableFocused, setTurntableFocused] = useState(false);
   const [focusedArt, setFocusedArt] = useState<WallArtFocus>(null);
   const hoverTransitionKeyRef = useRef<string | null>(null);
+  const { tier, mode, setMode } = usePerformanceTier();
+  const dpr = tierDpr(tier);
+  const activeRecords = libraryMode === "wantlist" ? (wantlistStatus === "ready" ? wantlistRecords : []) : records;
 
   const clearTurntableFocus = () => setTurntableFocused(false);
   const clearWallArtFocus = () => setFocusedArt(null);
@@ -106,6 +120,18 @@ export default function Scene({
   const clearActiveRecord = () => {
     pendingActiveIdRef.current = null;
     setActiveId(null);
+  };
+
+  const changeLibraryMode = (next: LibraryMode) => {
+    if (next === "wantlist") void onWantlistRequest?.();
+    if (next === libraryMode) return;
+    clearActiveRecord();
+    clearTurntableFocus();
+    clearWallArtFocus();
+    if (ledState.remoteOpen) setRemoteOpen(false);
+    if (ledState.paperOpen) setPaperOpen(false);
+    muteHoverFor(650);
+    setLibraryMode(next);
   };
 
   const requestActiveRecord = (nextId: string) => {
@@ -208,13 +234,13 @@ export default function Scene({
       if (!m) return;
       const idx = parseInt(m[1], 10);
       const nextIdx = idx + delta;
-      if (nextIdx < 0 || nextIdx >= records.length) return;
+      if (nextIdx < 0 || nextIdx >= activeRecords.length) return;
       e.preventDefault();
-      requestActiveRecord(`${records[nextIdx].id}-${nextIdx}`);
+      requestActiveRecord(`${activeRecords[nextIdx].id}-${nextIdx}`);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activeId, records]);
+  }, [activeId, activeRecords]);
 
   // pack records along the X axis, INSIDE fixed-size Kallax cells. Records
   // are LEFT-aligned: the first record's left edge sits ~1mm off the inner
@@ -228,7 +254,7 @@ export default function Scene({
   // (1mm at each end) so records fill the cell wall-to-wall.
   const RECORDS_PER_CELL = Math.floor((SHELF_INNER_W - 0.002) / stride);
 
-  const total = records.length;
+  const total = activeRecords.length;
   const recordCellsNeeded = Math.max(1, Math.ceil(total / RECORDS_PER_CELL));
 
   // Provisional layout (no player slot yet). If this fits in one row,
@@ -325,7 +351,7 @@ export default function Scene({
   // the remainder visibly empty. Computed once per render.
   const cellCounts = (() => {
     const counts = new Map<string, number>();
-    for (let i = 0; i < records.length; i++) {
+    for (let i = 0; i < activeRecords.length; i++) {
       const { col, row } = recordCell(i);
       const k = `${col},${row}`;
       counts.set(k, (counts.get(k) ?? 0) + 1);
@@ -389,7 +415,7 @@ export default function Scene({
     const m = /-(\d+)$/.exec(activeId);
     if (!m) return null;
     const idx = parseInt(m[1], 10);
-    return records[idx] ?? null;
+    return activeRecords[idx] ?? null;
   })();
 
   return (
@@ -403,15 +429,15 @@ export default function Scene({
       onPointerLeave={clearHover}
     >
       <Canvas
-        shadows
+        shadows={tier !== "low"}
         // DPR capped at 1.5: 2× on retina renders 4× the pixels of 1×,
         // which doubles shadow map + bloom fragment work for an effect
         // very few users can actually distinguish. 1.5× is the sweet spot —
         // visually indistinguishable from 2× at normal viewing distance,
         // ~30% less pixel work on retina laptops.
-        dpr={[1, 1.5]}
+        dpr={dpr}
         camera={{ position: [0.05, 0.52, 1.05], fov: BASE_FOV, near: 0.01, far: 50 }}
-        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.6 }}
+        gl={{ antialias: tier === "high", toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: tier === "low" ? 0.82 : 0.6 }}
         onPointerMissed={() => {
           clearHover();
           clearActiveRecord();
@@ -424,11 +450,11 @@ export default function Scene({
         }}
       >
         {/* dusky warm cream — dimmer than midday, like dusk indoor light */}
-        <color attach="background" args={["#3a2e22"]} />
+        <color attach="background" args={[tier === "low" ? "#4a3a2a" : "#3a2e22"]} />
         {/* warm fog softens the back wall and adds depth */}
-        <fog attach="fog" args={["#2a1f15", 0.8, 3.2]} />
+        <fog attach="fog" args={[tier === "low" ? "#3a2b1e" : "#2a1f15", 0.8, tier === "low" ? 3.8 : 3.2]} />
 
-        <Lights />
+        <Lights tier={tier} />
         <SceneReadySignal onReady={onReady} />
 
         {/* No HDRI environment — kills the bright IBL that was washing out the wall */}
@@ -441,7 +467,7 @@ export default function Scene({
           focusedArt={focusedArt}
           onSelectArt={toggleWallArtFocus}
         />
-        <RainShadow />
+        {tier !== "low" && <RainShadow />}
         <Shelf cols={cols} rows={rows} />
 
         {/* Turntable — on TOP of the shelf for single-row units (where it
@@ -470,10 +496,11 @@ export default function Scene({
         <RGBStrip
           position={[0, ledStripY, -0.012]}
           size={[cols * SHELF_CELL - SHELF_WALL * 2 - 0.002, 0.0035, 0.008]}
-          count={32 * cols}
-          withLight
+          count={(tier === "low" ? 12 : tier === "medium" ? 20 : 32) * cols}
+          withLight={tier !== "low"}
           lightDistance={0.65}
-          lightMultiplier={1.3}
+          lightMultiplier={tier === "medium" ? 0.75 : 1.3}
+          tier={tier}
         />
         {/* matte-black cove ceiling — blocks any stray bounce/bloom from
             spilling UP through the shelf top */}
@@ -506,7 +533,7 @@ export default function Scene({
           rotation={[0, -0.32, 0]}
         />
 
-        {records.map((rec, i) => {
+        {activeRecords.map((rec, i) => {
           const p = placeRecord(i);
           const recordId = `${rec.id}-${i}`;
           // Index-suffix the key so duplicates in the source collection
@@ -520,6 +547,7 @@ export default function Scene({
               shelfY={p.y}
               active={activeId === recordId}
               disabled={turntableFocused || focusedArt !== null}
+              quality={tier}
               onSelect={() => requestActiveRecord(recordId)}
               onRetracted={handleRecordRetracted}
               flipSignal={flipRequest.recordId === recordId ? flipRequest.signal : 0}
@@ -527,7 +555,7 @@ export default function Scene({
           );
         })}
 
-        <DustMotes />
+        {tier !== "low" && <DustMotes tier={tier} />}
 
         <ActiveSpotlight active={!!activeId} />
         <TurntableSpotlight focused={turntableFocused} target={turntablePos} />
@@ -543,25 +571,44 @@ export default function Scene({
           shelfHalfWidth={shelfHalfWidth}
         />
 
-        <EffectComposer multisampling={0}>
-          {/* bloom — picks up the emissive LED strips so they actually glow.
-              Lowered threshold so the high-emissive strips bloom but the dim
-              wall plaster still does not. */}
-          <Bloom
-            intensity={0.7}
-            luminanceThreshold={0.55}
-            luminanceSmoothing={0.5}
-            kernelSize={KernelSize.LARGE}
-          />
-          {/* deeper vignette = the corners fall into dim cozy shadow */}
-          <Vignette eskil={false} offset={0.28} darkness={0.85} />
-        </EffectComposer>
+        {tier === "high" ? (
+          <EffectComposer multisampling={0}>
+            {/* bloom — picks up the emissive LED strips so they actually glow.
+                Lowered threshold so the high-emissive strips bloom but the dim
+                wall plaster still does not. */}
+            <Bloom
+              intensity={0.7}
+              luminanceThreshold={0.55}
+              luminanceSmoothing={0.5}
+              kernelSize={KernelSize.LARGE}
+            />
+            {/* deeper vignette = the corners fall into dim cozy shadow */}
+            <Vignette eskil={false} offset={0.28} darkness={0.85} />
+          </EffectComposer>
+        ) : tier === "medium" ? (
+          <EffectComposer multisampling={0}>
+            <Bloom
+              intensity={0.45}
+              luminanceThreshold={0.7}
+              luminanceSmoothing={0.45}
+              kernelSize={KernelSize.MEDIUM}
+            />
+            <Vignette eskil={false} offset={0.28} darkness={0.72} />
+          </EffectComposer>
+        ) : null}
       </Canvas>
 
       <InfoPanel rec={active} onClose={clearActiveRecord} onFlipBack={flipActiveRecordToBack} />
       <HoverTooltip />
-      <Header total={total} username={username} source={source} />
+      <Header total={total} username={username} source={source} mode={libraryMode} wantlistStatus={wantlistStatus} />
+      <LibraryToggle
+        mode={libraryMode}
+        source={source}
+        wantlistStatus={wantlistStatus}
+        onModeChange={changeLibraryMode}
+      />
       <Footer />
+      <QualityGear mode={mode} tier={tier} onModeChange={setMode} />
     </div>
   );
 }
@@ -1109,8 +1156,120 @@ function WallArtSpotlight({
   );
 }
 
+function QualityGear({
+  mode,
+  tier,
+  onModeChange,
+}: {
+  mode: PerformanceMode;
+  tier: PerformanceTier;
+  onModeChange: (mode: PerformanceMode) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && rootRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="pointer-events-auto absolute bottom-16 right-7 z-50 flex flex-col items-end gap-2">
+      {open && (
+        <div className="w-56 rounded-2xl border border-ink/15 bg-paper/95 p-3 text-ink shadow-[0_18px_70px_rgba(0,0,0,0.34)] backdrop-blur-md">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="font-sans text-[9px] uppercase tracking-[0.3em] text-inkSoft/80">quality</div>
+            <div className="rounded-full bg-ink/10 px-2 py-0.5 font-sans text-[9px] uppercase tracking-[0.22em] text-ink/80">
+              {tier}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {QUALITY_MODES.map((item) => {
+              const active = mode === item;
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onModeChange(item)}
+                  className={[
+                    "rounded-full border px-2 py-1.5 font-sans text-[9px] uppercase tracking-[0.2em] transition",
+                    active
+                      ? "border-ink/70 bg-ink text-paper shadow-[0_8px_20px_rgba(45,37,28,0.16)]"
+                      : "border-ink/15 bg-ink/[0.04] text-inkSoft hover:border-ink/25 hover:bg-ink/10 hover:text-ink",
+                  ].join(" ")}
+                >
+                  {item === "auto" ? `auto · ${tier}` : item}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      <button
+        type="button"
+        aria-label="Quality settings"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="grid h-9 w-9 place-items-center rounded-full border border-inkSoft/15 bg-[#120d09]/45 font-sans text-sm text-inkSoft/60 shadow-[0_10px_34px_rgba(0,0,0,0.22)] backdrop-blur-md transition hover:border-inkSoft/25 hover:bg-[#120d09]/65 hover:text-inkSoft/85"
+      >
+        ⚙
+      </button>
+    </div>
+  );
+}
+
+function LibraryToggle({
+  mode,
+  source,
+  wantlistStatus,
+  onModeChange,
+}: {
+  mode: LibraryMode;
+  source?: "discogs" | "demo";
+  wantlistStatus: WantlistStatus;
+  onModeChange: (mode: LibraryMode) => void;
+}) {
+  if (source !== "discogs") return null;
+
+  const options: LibraryMode[] = ["collection", "wantlist"];
+
+  return (
+    <div className="pointer-events-auto absolute left-1/2 top-7 z-20 flex -translate-x-1/2 rounded-full border border-paper/12 bg-[#120d09]/55 p-1 shadow-[0_12px_44px_rgba(0,0,0,0.24)] backdrop-blur-md">
+      {options.map((item) => {
+        const active = mode === item;
+        const loading = item === "wantlist" && wantlistStatus === "loading";
+        return (
+          <button
+            key={item}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onModeChange(item)}
+            className={[
+              "rounded-full px-3 py-1.5 font-sans text-[9px] uppercase tracking-[0.24em] transition",
+              active
+                ? "bg-paper/90 text-[#160f09] shadow-[0_0_18px_rgba(236,219,184,0.12)]"
+                : "text-paper/62 hover:bg-paper/10 hover:text-paper",
+            ].join(" ")}
+          >
+            {loading ? "loading" : item}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Header({
   total,
+  mode,
+  wantlistStatus,
 }: {
   total: number;
   // username/source props are accepted by callers but no longer rendered —
@@ -1118,14 +1277,24 @@ function Header({
   // the right, all in the same warm-cream tone for a calmer top edge.
   username?: string;
   source?: "discogs" | "demo";
+  mode: LibraryMode;
+  wantlistStatus: WantlistStatus;
 }) {
+  const countLabel = mode === "wantlist"
+    ? wantlistStatus === "loading"
+      ? "loading wantlist..."
+      : wantlistStatus === "error"
+        ? "wantlist unavailable"
+        : `${total} wanted · sort: a–z`
+    : `${total} records · sort: a–z`;
+
   return (
     <div className="pointer-events-none absolute left-0 right-0 top-0 z-10 flex items-center justify-between p-7">
       <div className="font-sans text-[10px] uppercase tracking-[0.32em] text-inkSoft/80">
         <span className="serif italic text-inkSoft/80 text-sm normal-case tracking-normal">rycord</span>
       </div>
       <div className="font-sans text-[10px] uppercase tracking-[0.32em] text-inkSoft/80">
-        {total} records · sort: a–z
+        {countLabel}
       </div>
     </div>
   );

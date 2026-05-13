@@ -58,6 +58,13 @@ type CollectionCacheFile = {
   rawReleases: unknown[];
 };
 
+type WantlistCacheFile = {
+  user: string;
+  fetchedAt: string;
+  releases: DiscogsRelease[];
+  rawWants: unknown[];
+};
+
 export type FetchCollectionOptions = {
   refresh?: boolean;
 };
@@ -68,6 +75,11 @@ export type FetchCollectionResult = {
   prunedReleaseIds: string[];
 };
 
+export type FetchWantlistResult = {
+  releases: DiscogsRelease[];
+  source: "cache" | "discogs";
+};
+
 type RawFormat = {
   name?: string;
   qty?: string;
@@ -75,20 +87,29 @@ type RawFormat = {
   text?: string;
 };
 
+type RawBasicInformation = {
+  id?: number;
+  title?: string;
+  year?: number;
+  cover_image?: string;
+  thumb?: string;
+  artists?: { name?: string }[];
+  labels?: { name?: string }[];
+  genres?: string[];
+  country?: string;
+  formats?: RawFormat[];
+};
+
 type RawCollectionRelease = {
   id?: number;
   instance_id?: number;
-  basic_information?: {
-    title?: string;
-    year?: number;
-    cover_image?: string;
-    thumb?: string;
-    artists?: { name?: string }[];
-    labels?: { name?: string }[];
-    genres?: string[];
-    country?: string;
-    formats?: RawFormat[];
-  };
+  basic_information?: RawBasicInformation;
+};
+
+type RawWantlistRelease = {
+  id?: number;
+  date_added?: string;
+  basic_information?: RawBasicInformation;
 };
 
 type RawTrack = {
@@ -226,6 +247,81 @@ export async function fetchCollectionResult(username: string, options: FetchColl
     : [];
 
   return { releases: normalized, source: "discogs", prunedReleaseIds };
+}
+
+export async function fetchWantlistResult(username: string, options: FetchCollectionOptions = {}): Promise<FetchWantlistResult> {
+  const cacheKey = safeCacheKey(username);
+  const cached = await readJsonCache<WantlistCacheFile>("wantlists", `${cacheKey}.json`);
+  if (!options.refresh && cached?.releases && Array.isArray(cached.releases)) {
+    return { releases: cached.releases, source: "cache" };
+  }
+
+  const headers: HeadersInit = { "User-Agent": USER_AGENT };
+  const token = process.env.DISCOGS_TOKEN;
+  if (token) headers["Authorization"] = `Discogs token=${token}`;
+
+  const firstUrl = `${DISCOGS_BASE}/users/${encodeURIComponent(username)}/wants?per_page=${PER_PAGE}&page=1`;
+  const firstRes = await fetch(firstUrl, { headers, cache: "no-store" });
+  if (!firstRes.ok) {
+    throw new Error(`Discogs ${firstRes.status}: ${await firstRes.text().catch(() => "")}`);
+  }
+  const firstData = await firstRes.json();
+  const totalPages: number = firstData.pagination?.pages ?? 1;
+
+  const restPromises: Promise<Response>[] = [];
+  for (let p = 2; p <= totalPages; p++) {
+    const url = `${DISCOGS_BASE}/users/${encodeURIComponent(username)}/wants?per_page=${PER_PAGE}&page=${p}`;
+    restPromises.push(fetch(url, { headers, cache: "no-store" }));
+  }
+  const restRes = await Promise.all(restPromises);
+  const restData = await Promise.all(
+    restRes.map((r) =>
+      r.ok ? r.json() : Promise.resolve({ wants: [] as unknown[] }),
+    ),
+  );
+
+  const allRaw: RawWantlistRelease[] = [firstData.wants ?? [], ...restData.map((d) => d.wants ?? [])].flat();
+  const normalized: DiscogsRelease[] = allRaw
+    .map((r): DiscogsRelease | null => {
+      const bi = r.basic_information;
+      const id = bi?.id ?? r.id;
+      if (!bi || !id) return null;
+      const artist = (bi.artists ?? []).map((a) => a.name ?? "").filter(Boolean).join(", ") || "Various";
+      const label = (bi.labels ?? []).map((l) => l.name ?? "").filter(Boolean)[0] ?? "";
+      const genre = (bi.genres ?? [])[0] ?? "";
+      return {
+        id,
+        instanceId: id,
+        artist: cleanArtist(artist),
+        title: bi.title ?? "Untitled",
+        year: bi.year ?? 0,
+        label,
+        genre,
+        country: bi.country ?? "",
+        coverImage: bi.cover_image ?? "",
+        thumbImage: bi.thumb ?? "",
+        formats: bi.formats ?? [],
+      };
+    })
+    .filter((r): r is DiscogsRelease => r !== null);
+
+  const collator = new Intl.Collator("en", { sensitivity: "base", ignorePunctuation: true });
+  normalized.sort((a, b) => {
+    const aArtist = sortKey(a.artist);
+    const bArtist = sortKey(b.artist);
+    const byArtist = collator.compare(aArtist, bArtist);
+    if (byArtist !== 0) return byArtist;
+    return collator.compare(sortKey(a.title), sortKey(b.title));
+  });
+
+  await writeJsonCache({
+    user: username,
+    fetchedAt: new Date().toISOString(),
+    releases: normalized,
+    rawWants: allRaw,
+  } satisfies WantlistCacheFile, "wantlists", `${cacheKey}.json`);
+
+  return { releases: normalized, source: "discogs" };
 }
 
 export async function fetchReleaseDetails(id: string): Promise<ReleaseDetails> {

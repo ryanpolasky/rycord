@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { LEDS_PER_CELL, evalPattern, ACCENT_INTENSITY } from "@/lib/accent";
 import { getLedState } from "@/lib/ledStore";
+import type { PerformanceTier } from "@/lib/performance";
 
 // An "addressable" LED strip rendered as an InstancedMesh of small bright
 // boxes. Each LED gets its own color every frame, fed by the pattern
@@ -29,6 +30,7 @@ type Props = {
   lightMultiplier?: number;
   /** Bounce light distance. */
   lightDistance?: number;
+  tier?: PerformanceTier;
 };
 
 export default function RGBStrip({
@@ -38,6 +40,7 @@ export default function RGBStrip({
   withLight = true,
   lightMultiplier = 1.0,
   lightDistance = 0.8,
+  tier = "high",
 }: Props) {
   const ref = useRef<THREE.InstancedMesh>(null);
   const lightA = useRef<THREE.PointLight>(null);
@@ -70,6 +73,7 @@ export default function RGBStrip({
     intensity: 0,
     initialized: false,
   });
+  const paintAccum = useRef(0);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -84,8 +88,10 @@ export default function RGBStrip({
     ref.current.instanceMatrix.needsUpdate = true;
   }, [count, length, slot, dummy]);
 
-  useFrame((sceneState) => {
+  useFrame((sceneState, rawDt) => {
     if (!ref.current) return;
+    const updateFps = tier === "low" ? 15 : tier === "medium" ? 24 : 60;
+    paintAccum.current += Math.min(rawDt, 0.1);
     const t = sceneState.clock.elapsedTime;
     const ledState = getLedState();
     const { pattern, enabled, color, intensity } = ledState;
@@ -108,6 +114,8 @@ export default function RGBStrip({
     // user has the strip on a solid color or off — the loop was burning
     // 32-160 setColorAt() calls every frame for no visible benefit.
     if (!stateChanged && !isTimeDependent) return;
+    if (isTimeDependent && paintAccum.current < 1 / updateFps) return;
+    paintAccum.current = 0;
 
     // recompute color for every LED this frame
     for (let i = 0; i < count; i++) {

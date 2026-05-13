@@ -3,6 +3,7 @@
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import type { PerformanceTier } from "@/lib/performance";
 
 // Tiny floating dust particles backlit by the imaginary lamp — almost
 // invisible, but lend a "there's air in this room" feeling.
@@ -15,12 +16,13 @@ const COUNT = 60;
 // but we halve the per-frame matrix-write work + instanceMatrix uploads.
 const DUST_UPDATE_INTERVAL = 1 / 30;
 
-export default function DustMotes() {
+export default function DustMotes({ tier = "high" }: { tier?: PerformanceTier }) {
   const mesh = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const accum = useRef(0);
+  const count = tier === "medium" ? 36 : COUNT;
   const seeds = useMemo(() => {
-    return Array.from({ length: COUNT }, () => ({
+    return Array.from({ length: count }, () => ({
       x: (Math.random() - 0.5) * 1.0,
       y: -0.16 + Math.random() * 0.45,
       z: 0.08 + Math.random() * 0.32,
@@ -28,7 +30,7 @@ export default function DustMotes() {
       speed: 0.04 + Math.random() * 0.08,
       drift: 0.04 + Math.random() * 0.05,
     }));
-  }, []);
+  }, [count]);
 
   useFrame((state, rawDt) => {
     if (!mesh.current) return;
@@ -36,7 +38,7 @@ export default function DustMotes() {
     if (accum.current < DUST_UPDATE_INTERVAL) return;
     accum.current = 0;
     const t = state.clock.elapsedTime;
-    for (let i = 0; i < COUNT; i++) {
+    for (let i = 0; i < count; i++) {
       const s = seeds[i];
       const x = s.x + Math.sin(t * s.speed + s.phase) * s.drift;
       const y = s.y + Math.cos(t * s.speed * 0.7 + s.phase) * 0.03;
@@ -51,7 +53,7 @@ export default function DustMotes() {
   });
 
   return (
-    <instancedMesh ref={mesh} args={[undefined, undefined, COUNT]}>
+    <instancedMesh ref={mesh} args={[undefined, undefined, count]}>
       <sphereGeometry args={[1, 6, 6]} />
       <meshBasicMaterial color="#fff2d6" transparent opacity={0.4} toneMapped={false} />
     </instancedMesh>

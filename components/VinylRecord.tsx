@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { generateCoverCanvas, generateSpineCanvas, generateBackCanvas, type BackTrack } from "@/lib/generateCover";
 import type { DemoRecord } from "@/lib/covers";
 import { setHoveredRecord } from "@/lib/hoverStore";
+import type { PerformanceTier } from "@/lib/performance";
 import { loadReleaseDetails } from "@/lib/releaseDetails";
 
 // Geometry orientation for a vinyl jacket on a shelf:
@@ -118,12 +119,13 @@ type Props = {
   shelfY?: number;
   active: boolean;
   disabled?: boolean;
+  quality?: PerformanceTier;
   onSelect: () => void;
   onRetracted?: () => void;
   flipSignal?: number;
 };
 
-export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled = false, onSelect, onRetracted, flipSignal = 0 }: Props) {
+export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled = false, quality = "high", onSelect, onRetracted, flipSignal = 0 }: Props) {
   const group = useRef<THREE.Group>(null);
   const [hover, setHover] = useState(false);
 
@@ -185,13 +187,17 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
         topEdgeColor: rec.palette.bg,
       };
     }
-    const cover = generateCoverCanvas(rec, 1024);
-    const spine = generateSpineCanvas(rec, 48, 2400);
-    const back = generateBackCanvas(rec, 1024);
+    const faceSize = quality === "low" ? 512 : 1024;
+    const spineW = quality === "low" ? 32 : 48;
+    const spineH = quality === "low" ? 1200 : 2400;
+    const anisotropy = quality === "high" ? 8 : quality === "medium" ? 4 : 2;
+    const cover = generateCoverCanvas(rec, faceSize);
+    const spine = generateSpineCanvas(rec, spineW, spineH);
+    const back = generateBackCanvas(rec, faceSize);
     const t = (c: HTMLCanvasElement) => {
       const tex = new THREE.CanvasTexture(c);
       tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = 8;
+      tex.anisotropy = anisotropy;
       tex.needsUpdate = true;
       return tex;
     };
@@ -205,7 +211,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
       // dark fiberboard at the cut edge anyway — this matches.
       topEdgeColor: shadeHex(rec.palette.bg, -0.7),
     };
-  }, [rec]);
+  }, [rec, quality]);
 
   // Real cover image (Discogs). Loaded async, falls back to procedural if
   // it's missing or fails to load.
@@ -226,7 +232,9 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
           return;
         }
         tex.colorSpace = THREE.SRGBColorSpace;
-        tex.anisotropy = 8;
+        tex.anisotropy = quality === "high" ? 8 : quality === "medium" ? 4 : 2;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
         tex.needsUpdate = true;
         setRealCoverMap(tex);
       },
@@ -238,7 +246,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
     return () => {
       cancelled = true;
     };
-  }, [rec.coverUrl]);
+  }, [rec.coverUrl, quality]);
 
   const coverMap = realCoverMap ?? proceduralCoverMap;
 
@@ -268,17 +276,17 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
         position: t.position,
         duration: t.duration,
       }));
-      const canvas = generateBackCanvas(enriched, 1024, tracks.length > 0 ? tracks : undefined);
+      const canvas = generateBackCanvas(enriched, quality === "low" ? 512 : 1024, tracks.length > 0 ? tracks : undefined);
       const tex = new THREE.CanvasTexture(canvas);
       tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = 8;
+      tex.anisotropy = quality === "high" ? 8 : quality === "medium" ? 4 : 2;
       tex.needsUpdate = true;
       setRealBackMap(tex);
     });
     return () => {
       cancelled = true;
     };
-  }, [active, rec]);
+  }, [active, rec, quality]);
 
   const backMap = realBackMap ?? proceduralBackMap;
 
@@ -577,7 +585,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
         window.addEventListener("pointercancel", onUp);
       }}
     >
-      <mesh castShadow receiveShadow geometry={JACKET_GEOMETRY}>
+      <mesh castShadow={quality !== "low"} receiveShadow={quality !== "low"} geometry={JACKET_GEOMETRY}>
         {/* Face order: +X cover front, -X cover back, +Y top edge, -Y bot edge,
             +Z spine (faces camera at rest), -Z back of spine (toward back wall). */}
         <meshStandardMaterial attach="material-0" map={coverMap} roughness={0.55} metalness={0.04} />

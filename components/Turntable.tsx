@@ -128,9 +128,11 @@ export default function Turntable({
   focused = false,
   onClick,
 }: Props) {
+  const group = useRef<THREE.Group>(null);
   const platter = useRef<THREE.Group>(null);
   const recordSwap = useRef<THREE.Group>(null);
   const tonearm = useRef<THREE.Group>(null);
+  const pointerInside = useRef(false);
   // Spin target, read inside useFrame. Stored in a ref so changes to
   // nowPlaying don't force the whole Turntable subtree to re-render.
   const targetRpm = useRef(0);
@@ -486,8 +488,14 @@ export default function Turntable({
     };
   })();
 
+  useEffect(() => {
+    if (!pointerInside.current) return;
+    setHoveredNote(note);
+  }, [note]);
+
   const onPointerOver = (e: { stopPropagation: () => void }) => {
     e.stopPropagation();
+    pointerInside.current = true;
     setHoveredNote(note);
     // "zoom-out" glyph while focused (since clicking again dismisses the
     // closeup), standard pointer otherwise.
@@ -495,6 +503,7 @@ export default function Turntable({
   };
   const onPointerOut = (e: { stopPropagation: () => void }) => {
     e.stopPropagation();
+    pointerInside.current = false;
     setHoveredNote(null);
     document.body.style.cursor = "auto";
   };
