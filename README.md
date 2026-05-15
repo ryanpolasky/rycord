@@ -35,6 +35,7 @@ See `.env.example` for the full commented list.
 | `DISCOGS_USER`       | no       | Discogs username for the shelf               |
 | `DISCOGS_TOKEN`      | no       | Personal token for authenticated requests    |
 | `RYCORD_HIDDEN_RELEASE_IDS` | no | Comma/space-separated release IDs to hide    |
+| `RYCORD_ADMIN_PASSWORD` | no    | Password for hidden settings-cog admin tools |
 | `RYCORD_REFRESH_TOKEN` | no     | Secret required for manual Discogs refreshes |
 | `RYCORD_DATA_DIR`    | no       | Cache root, defaults to `./data`             |
 | `LASTFM_API_KEY`     | no       | Description fallback after Wikipedia         |
@@ -84,19 +85,23 @@ The filter applies to both the collection shelf and wantlist mode.
 ## refresh from Discogs
 
 Rycord does not auto-refresh Discogs data. Normal app loads use the local cache
-forever unless `refresh=1` is passed with `RYCORD_REFRESH_TOKEN`.
+forever unless `refresh=1` is passed with `RYCORD_ADMIN_PASSWORD` or
+`RYCORD_REFRESH_TOKEN`.
+
+You can also double-click the settings cog, enter `RYCORD_ADMIN_PASSWORD`, and
+refresh the collection or wantlist from the hidden admin panel.
 
 Use `refresh=1` when you intentionally want to re-pull your Discogs collection:
 
 ```bash
-curl -H "Authorization: Bearer YOUR_REFRESH_TOKEN" \
+curl -H "Authorization: Bearer YOUR_ADMIN_PASSWORD" \
   "http://localhost:3030/api/collection?user=YOUR_DISCOGS_USER&refresh=1"
 ```
 
 Refresh the wantlist the same way:
 
 ```bash
-curl -H "Authorization: Bearer YOUR_REFRESH_TOKEN" \
+curl -H "Authorization: Bearer YOUR_ADMIN_PASSWORD" \
   "http://localhost:3030/api/wantlist?user=YOUR_DISCOGS_USER&refresh=1"
 ```
 

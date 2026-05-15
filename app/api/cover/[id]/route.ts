@@ -7,20 +7,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchCoverCached } from "@/lib/cachedAssets";
 import { canonicalReleaseId } from "@/lib/discogs";
+import { coverOverrideFor } from "@/lib/coverOverrides";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const u = req.nextUrl.searchParams.get("u");
+  const releaseId = canonicalReleaseId(id);
+  const overrideUrl = await coverOverrideFor(releaseId);
+  const u = overrideUrl ?? req.nextUrl.searchParams.get("u");
   if (!u) {
     return NextResponse.json({ error: "missing u" }, { status: 400 });
   }
-  // sanity: only proxy i.discogs.com images
+
   try {
     const parsed = new URL(u);
-    if (!parsed.hostname.endsWith("discogs.com")) {
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return NextResponse.json({ error: "host not allowed" }, { status: 400 });
+    }
+    if (!overrideUrl && !parsed.hostname.endsWith("discogs.com")) {
       return NextResponse.json({ error: "host not allowed" }, { status: 400 });
     }
   } catch {
@@ -28,7 +34,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
 
   try {
-    const cover = await fetchCoverCached(canonicalReleaseId(id), u);
+    const cover = await fetchCoverCached(releaseId, u);
     if (!cover) return NextResponse.json({ error: "cover unavailable" }, { status: 502 });
     return new NextResponse(new Uint8Array(cover.buf), {
       headers: {

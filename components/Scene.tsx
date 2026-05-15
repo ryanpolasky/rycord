@@ -608,7 +608,7 @@ export default function Scene({
         onModeChange={changeLibraryMode}
       />
       <Footer />
-      <QualityGear mode={mode} tier={tier} onModeChange={setMode} />
+      <QualityGear mode={mode} tier={tier} username={username} source={source} onModeChange={setMode} />
     </div>
   );
 }
@@ -1160,13 +1160,25 @@ function WallArtSpotlight({
 function QualityGear({
   mode,
   tier,
+  username,
+  source,
   onModeChange,
 }: {
   mode: PerformanceMode;
   tier: PerformanceTier;
+  username: string;
+  source?: "discogs" | "demo";
   onModeChange: (mode: PerformanceMode) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [hiddenInput, setHiddenInput] = useState("");
+  const [coverReleaseId, setCoverReleaseId] = useState("");
+  const [coverUrl, setCoverUrl] = useState("");
+  const [adminStatus, setAdminStatus] = useState("");
+  const [adminBusy, setAdminBusy] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1180,10 +1192,96 @@ function QualityGear({
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
 
+  const authHeaders = {
+    Authorization: `Bearer ${adminPassword}`,
+    "Content-Type": "application/json",
+  };
+
+  const authOnlyHeaders = {
+    Authorization: `Bearer ${adminPassword}`,
+  };
+
+  const unlockAdmin = async () => {
+    setAdminBusy("unlock");
+    setAdminStatus("");
+    try {
+      const res = await fetch("/api/admin/hidden-releases", { headers: authOnlyHeaders });
+      const data = await res.json().catch(() => ({})) as { ids?: string[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "admin unlock failed");
+      setHiddenInput((data.ids ?? []).join("\n"));
+      setAdminUnlocked(true);
+      setAdminStatus("admin unlocked");
+    } catch (err) {
+      setAdminUnlocked(false);
+      setAdminStatus(err instanceof Error ? err.message : "admin unlock failed");
+    } finally {
+      setAdminBusy(null);
+    }
+  };
+
+  const refreshLibrary = async (kind: "collection" | "wantlist") => {
+    setAdminBusy(kind);
+    setAdminStatus("");
+    try {
+      const res = await fetch(`/api/${kind}?user=${encodeURIComponent(username)}&refresh=1`, { headers: authOnlyHeaders });
+      const data = await res.json().catch(() => ({})) as { items?: unknown[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `${kind} refresh failed`);
+      setAdminStatus(`${kind} refreshed · ${data.items?.length ?? 0} visible`);
+    } catch (err) {
+      setAdminStatus(err instanceof Error ? err.message : `${kind} refresh failed`);
+    } finally {
+      setAdminBusy(null);
+    }
+  };
+
+  const saveHidden = async () => {
+    setAdminBusy("hidden");
+    setAdminStatus("");
+    try {
+      const res = await fetch("/api/admin/hidden-releases", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ input: hiddenInput, mode: "replace" }),
+      });
+      const data = await res.json().catch(() => ({})) as { ids?: string[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "hidden list save failed");
+      setHiddenInput((data.ids ?? []).join("\n"));
+      setAdminStatus("hidden list saved · reload room to apply");
+    } catch (err) {
+      setAdminStatus(err instanceof Error ? err.message : "hidden list save failed");
+    } finally {
+      setAdminBusy(null);
+    }
+  };
+
+  const saveCover = async (remove = false) => {
+    setAdminBusy("cover");
+    setAdminStatus("");
+    try {
+      const res = await fetch("/api/admin/cover-overrides", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ releaseId: coverReleaseId, url: coverUrl, remove }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "cover override failed");
+      setAdminStatus(remove ? "cover override removed · reload room to apply" : "cover override saved · reload room to apply");
+      if (!remove) setCoverUrl("");
+    } catch (err) {
+      setAdminStatus(err instanceof Error ? err.message : "cover override failed");
+    } finally {
+      setAdminBusy(null);
+    }
+  };
+
+  const inputClass = "w-full rounded-xl border border-ink/15 bg-white/55 px-2.5 py-2 font-sans text-[11px] text-ink outline-none transition placeholder:text-inkSoft/45 focus:border-ink/35 focus:bg-white/70";
+  const buttonClass = "rounded-full border border-ink/15 bg-ink/[0.04] px-3 py-1.5 font-sans text-[9px] uppercase tracking-[0.2em] text-inkSoft transition hover:border-ink/25 hover:bg-ink/10 hover:text-ink disabled:cursor-not-allowed disabled:opacity-45";
+  const activeButtonClass = "rounded-full border border-ink/70 bg-ink px-3 py-1.5 font-sans text-[9px] uppercase tracking-[0.2em] text-paper shadow-[0_8px_20px_rgba(45,37,28,0.16)] transition disabled:cursor-not-allowed disabled:opacity-45";
+
   return (
     <div ref={rootRef} className="pointer-events-auto absolute bottom-16 right-7 z-50 flex flex-col items-end gap-2">
       {open && (
-        <div className="w-56 rounded-2xl border border-ink/15 bg-paper/95 p-3 text-ink shadow-[0_18px_70px_rgba(0,0,0,0.34)] backdrop-blur-md">
+        <div data-allow-native-scroll="true" className={`${adminOpen ? "w-[24rem]" : "w-56"} max-h-[72vh] overflow-y-auto rounded-2xl border border-ink/15 bg-paper/95 p-3 text-ink shadow-[0_18px_70px_rgba(0,0,0,0.34)] backdrop-blur-md`}>
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="font-sans text-[9px] uppercase tracking-[0.3em] text-inkSoft/80">quality</div>
             <div className="rounded-full bg-ink/10 px-2 py-0.5 font-sans text-[9px] uppercase tracking-[0.22em] text-ink/80">
@@ -1211,6 +1309,116 @@ function QualityGear({
               );
             })}
           </div>
+          {adminOpen ? (
+            <div className="mt-4 border-t border-ink/10 pt-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="font-sans text-[9px] uppercase tracking-[0.3em] text-inkSoft/80">admin</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminOpen(false);
+                    setAdminStatus("");
+                  }}
+                  className="font-sans text-[9px] uppercase tracking-[0.2em] text-inkSoft/55 transition hover:text-ink"
+                >
+                  close
+                </button>
+              </div>
+              {!adminUnlocked ? (
+                <form
+                  className="space-y-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void unlockAdmin();
+                  }}
+                >
+                  <input
+                    type="password"
+                    value={adminPassword}
+                    onChange={(event) => setAdminPassword(event.target.value)}
+                    placeholder="admin password"
+                    className={inputClass}
+                  />
+                  <button type="submit" disabled={adminBusy !== null || adminPassword.trim() === ""} className={activeButtonClass}>
+                    {adminBusy === "unlock" ? "checking" : "unlock"}
+                  </button>
+                </form>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <div className="mb-2 font-sans text-[9px] uppercase tracking-[0.24em] text-inkSoft/70">refresh</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={adminBusy !== null || source !== "discogs"}
+                        onClick={() => void refreshLibrary("collection")}
+                        className={buttonClass}
+                      >
+                        {adminBusy === "collection" ? "refreshing" : "collection"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={adminBusy !== null || source !== "discogs"}
+                        onClick={() => void refreshLibrary("wantlist")}
+                        className={buttonClass}
+                      >
+                        {adminBusy === "wantlist" ? "refreshing" : "wantlist"}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-2 font-sans text-[9px] uppercase tracking-[0.24em] text-inkSoft/70">hidden releases</div>
+                    <textarea
+                      value={hiddenInput}
+                      onChange={(event) => setHiddenInput(event.target.value)}
+                      rows={5}
+                      placeholder={"12345\nhttps://www.discogs.com/release/67890-album"}
+                      className={`${inputClass} resize-y leading-relaxed`}
+                    />
+                    <button type="button" disabled={adminBusy !== null} onClick={() => void saveHidden()} className={`mt-2 ${activeButtonClass}`}>
+                      {adminBusy === "hidden" ? "saving" : "save hidden list"}
+                    </button>
+                  </div>
+                  <div>
+                    <div className="mb-2 font-sans text-[9px] uppercase tracking-[0.24em] text-inkSoft/70">cover override</div>
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={coverReleaseId}
+                        onChange={(event) => setCoverReleaseId(event.target.value)}
+                        placeholder="release id or discogs release URL"
+                        className={inputClass}
+                      />
+                      <input
+                        type="url"
+                        value={coverUrl}
+                        onChange={(event) => setCoverUrl(event.target.value)}
+                        placeholder="replacement image URL"
+                        className={inputClass}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" disabled={adminBusy !== null || coverReleaseId.trim() === "" || coverUrl.trim() === ""} onClick={() => void saveCover(false)} className={activeButtonClass}>
+                          {adminBusy === "cover" ? "saving" : "save cover"}
+                        </button>
+                        <button type="button" disabled={adminBusy !== null || coverReleaseId.trim() === ""} onClick={() => void saveCover(true)} className={buttonClass}>
+                          remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {adminStatus ? (
+                <div className="mt-3 rounded-xl bg-ink/[0.06] px-3 py-2 font-sans text-[10px] leading-relaxed text-inkSoft">
+                  {adminStatus}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-2 font-sans text-[9px] uppercase tracking-[0.18em] text-inkSoft/45">
+              double-click cog for admin
+            </div>
+          )}
         </div>
       )}
       <button
@@ -1218,6 +1426,10 @@ function QualityGear({
         aria-label="Quality settings"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
+        onDoubleClick={() => {
+          setOpen(true);
+          setAdminOpen(true);
+        }}
         className="grid h-9 w-9 place-items-center rounded-full border border-inkSoft/15 bg-[#120d09]/45 font-sans text-sm text-inkSoft/60 shadow-[0_10px_34px_rgba(0,0,0,0.22)] backdrop-blur-md transition hover:border-inkSoft/25 hover:bg-[#120d09]/65 hover:text-inkSoft/85"
       >
         ⚙
