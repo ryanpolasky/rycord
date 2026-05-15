@@ -789,17 +789,18 @@ function IdleCamera({
   }, []);
 
   // Target dolly: derived from the shelf grid size so the whole unit stays
-  // in frame. Baseline (cols=1, rows=1): camera at (0.05, 0.52, 1.05).
+  // in frame, with a minimum 3-column camera baseline for tiny collections.
   // Each extra col adds a bit of horizontal field; each extra row pushes
   // camera back + up to keep the top of the shelf in view.
+  const cameraCols = Math.max(cols, 3);
   const dolly = useMemo(() => {
     const baseX = 0.05;
     const baseY = 0.52;
     const baseZ = 1.05;
-    const dollyZ = baseZ + Math.max(0, cols - 1) * 0.28 + Math.max(0, rows - 1) * 0.32;
+    const dollyZ = baseZ + Math.max(0, cameraCols - 1) * 0.28 + Math.max(0, rows - 1) * 0.32;
     const dollyY = baseY + Math.max(0, rows - 1) * 0.18;
     return { x: baseX, y: dollyY, z: dollyZ };
-  }, [cols, rows]);
+  }, [cameraCols, rows]);
 
   // Lookat height creeps up so the camera stays pointed at the middle of the
   // grid instead of the bottom row.
@@ -902,7 +903,7 @@ function IdleCamera({
     // the shelf foreshortened HARD. At 55° they don't foreshorten as
     // much, you can scan across them comfortably, AND the front-cover
     // peek on hover still reads clearly.
-    const shelfRightEdge = cols * 0.5 * 0.33 + 0.28;     // SHELF_CELL ≈ 0.33m
+    const shelfRightEdge = cameraCols * 0.5 * 0.33 + 0.28;     // SHELF_CELL ≈ 0.33m
     sc.sidePos.set(
       shelfRightEdge + o.parX * 0.5,
       dolly.y * 0.95 + o.parY,

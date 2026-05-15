@@ -34,6 +34,7 @@ See `.env.example` for the full commented list.
 |----------------------|----------|----------------------------------------------|
 | `DISCOGS_USER`       | no       | Discogs username for the shelf               |
 | `DISCOGS_TOKEN`      | no       | Personal token for authenticated requests    |
+| `RYCORD_HIDDEN_RELEASE_IDS` | no | Comma/space-separated release IDs to hide    |
 | `RYCORD_DATA_DIR`    | no       | Cache root, defaults to `./data`             |
 | `LASTFM_API_KEY`     | no       | Description fallback after Wikipedia         |
 | `OPENROUTER_API_KEY` | no       | Final AI fallback for album descriptions     |
@@ -48,6 +49,7 @@ needed cache file does not exist yet.
 | path                       | contents                                                   |
 |----------------------------|------------------------------------------------------------|
 | `data/collections/*.json`  | Normalized collection entries and raw Discogs rows         |
+| `data/hidden-releases.json` | Optional display blacklist of Discogs release IDs          |
 | `data/releases/*.json`     | Release metadata, notes, tracklist, durations, raw payload |
 | `data/descriptions/*.json` | Wikipedia, Last.fm, or OpenRouter description payloads     |
 | `data/palettes/*.json`     | Derived cover palettes                                     |
@@ -60,6 +62,23 @@ Description lookup order is:
 3. OpenRouter
 
 Delete an individual cache file to force Rycord to fetch that item again.
+
+## hide records from the room
+
+To keep a release tracked in Discogs but hide it from Rycord, add its Discogs
+release ID to either:
+
+```dotenv
+RYCORD_HIDDEN_RELEASE_IDS=12345,67890
+```
+
+or create `data/hidden-releases.json`:
+
+```json
+["12345", "67890"]
+```
+
+The filter applies to both the collection shelf and wantlist mode.
 
 ## refresh from Discogs
 

@@ -12,6 +12,7 @@
 import "server-only";
 import { deleteCache, readJsonCache, safeCacheKey, writeJsonCache } from "@/lib/dataCache";
 import { deleteCachedAssets } from "@/lib/cachedAssets";
+import { filterHiddenReleases } from "@/lib/hiddenReleases";
 
 const USER_AGENT = "rycord/0.1 +https://rycord.com";
 const DISCOGS_BASE = "https://api.discogs.com";
@@ -145,7 +146,7 @@ export async function fetchCollectionResult(username: string, options: FetchColl
   const cacheKey = safeCacheKey(username);
   const cached = await readJsonCache<CollectionCacheFile>("collections", `${cacheKey}.json`);
   if (!options.refresh && cached?.releases && Array.isArray(cached.releases)) {
-    return { releases: cached.releases, source: "cache", prunedReleaseIds: [] };
+    return { releases: await filterHiddenReleases(cached.releases), source: "cache", prunedReleaseIds: [] };
   }
 
   const headers: HeadersInit = { "User-Agent": USER_AGENT };
@@ -246,14 +247,14 @@ export async function fetchCollectionResult(username: string, options: FetchColl
     ? await pruneRemovedReleaseCaches(cached.releases, normalized)
     : [];
 
-  return { releases: normalized, source: "discogs", prunedReleaseIds };
+  return { releases: await filterHiddenReleases(normalized), source: "discogs", prunedReleaseIds };
 }
 
 export async function fetchWantlistResult(username: string, options: FetchCollectionOptions = {}): Promise<FetchWantlistResult> {
   const cacheKey = safeCacheKey(username);
   const cached = await readJsonCache<WantlistCacheFile>("wantlists", `${cacheKey}.json`);
   if (!options.refresh && cached?.releases && Array.isArray(cached.releases)) {
-    return { releases: cached.releases, source: "cache" };
+    return { releases: await filterHiddenReleases(cached.releases), source: "cache" };
   }
 
   const headers: HeadersInit = { "User-Agent": USER_AGENT };
@@ -321,7 +322,7 @@ export async function fetchWantlistResult(username: string, options: FetchCollec
     rawWants: allRaw,
   } satisfies WantlistCacheFile, "wantlists", `${cacheKey}.json`);
 
-  return { releases: normalized, source: "discogs" };
+  return { releases: await filterHiddenReleases(normalized), source: "discogs" };
 }
 
 export async function fetchReleaseDetails(id: string): Promise<ReleaseDetails> {
