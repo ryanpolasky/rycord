@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchCollectionResult } from "@/lib/discogs";
 import { derivePaletteCached } from "@/lib/cachedAssets";
+import { refreshAuthorized, refreshRequested } from "@/lib/refreshAuth";
 import type { Palette } from "@/lib/palette";
 
 export const runtime = "nodejs";
@@ -26,7 +27,11 @@ export type CollectionItem = {
 
 export async function GET(req: NextRequest) {
   const user = req.nextUrl.searchParams.get("user") ?? "eggyb0i";
-  const refresh = req.nextUrl.searchParams.get("refresh") === "1";
+  const wantsRefresh = refreshRequested(req);
+  if (wantsRefresh && !refreshAuthorized(req)) {
+    return NextResponse.json({ user, items: [], error: "Refresh is not authorized" }, { status: 401 });
+  }
+  const refresh = wantsRefresh;
   try {
     const result = await fetchCollectionResult(user, { refresh });
     const { releases } = result;

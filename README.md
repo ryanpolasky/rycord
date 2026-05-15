@@ -35,6 +35,7 @@ See `.env.example` for the full commented list.
 | `DISCOGS_USER`       | no       | Discogs username for the shelf               |
 | `DISCOGS_TOKEN`      | no       | Personal token for authenticated requests    |
 | `RYCORD_HIDDEN_RELEASE_IDS` | no | Comma/space-separated release IDs to hide    |
+| `RYCORD_REFRESH_TOKEN` | no     | Secret required for manual Discogs refreshes |
 | `RYCORD_DATA_DIR`    | no       | Cache root, defaults to `./data`             |
 | `LASTFM_API_KEY`     | no       | Description fallback after Wikipedia         |
 | `OPENROUTER_API_KEY` | no       | Final AI fallback for album descriptions     |
@@ -82,13 +83,24 @@ The filter applies to both the collection shelf and wantlist mode.
 
 ## refresh from Discogs
 
+Rycord does not auto-refresh Discogs data. Normal app loads use the local cache
+forever unless `refresh=1` is passed with `RYCORD_REFRESH_TOKEN`.
+
 Use `refresh=1` when you intentionally want to re-pull your Discogs collection:
 
 ```bash
-curl "http://localhost:3030/api/collection?user=YOUR_DISCOGS_USER&refresh=1"
+curl -H "Authorization: Bearer YOUR_REFRESH_TOKEN" \
+  "http://localhost:3030/api/collection?user=YOUR_DISCOGS_USER&refresh=1"
 ```
 
-That request rewrites `data/collections/<user>.json`, compares old cached
+Refresh the wantlist the same way:
+
+```bash
+curl -H "Authorization: Bearer YOUR_REFRESH_TOKEN" \
+  "http://localhost:3030/api/wantlist?user=YOUR_DISCOGS_USER&refresh=1"
+```
+
+The collection request rewrites `data/collections/<user>.json`, compares old cached
 release IDs against the current Discogs collection, and prunes albums you no
 longer own from:
 
