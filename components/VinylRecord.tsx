@@ -149,6 +149,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
   const pullState = useRef({ p: 0, v: 0 });
   const hoverState = useRef({ p: 0, v: 0 });
   const wasPulledOut = useRef(false);
+  const needsRetractHandoff = useRef(false);
   // spinAngle: accumulated offset from front-face (FRONT_FACE_Y baseline).
   // Drives both ambient rocking (eased toward ROCK_AMP * sin(t)) and user
   // drag/momentum (set directly by pointer-move handler).
@@ -303,7 +304,10 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
   }, [active, flipSignal]);
 
   useEffect(() => {
-    if (active) return;
+    if (active) {
+      needsRetractHandoff.current = true;
+      return;
+    }
     spinRestCenter.current = 0;
     commandedSpinTarget.current = null;
   }, [active]);
@@ -330,7 +334,8 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
       Math.abs(hoverState.current.v) < 0.001 &&
       Math.abs(spinAngle.current) < 0.001 &&
       Math.abs(spinVel.current) < 0.001 &&
-      commandedSpinTarget.current === null
+      commandedSpinTarget.current === null &&
+      !needsRetractHandoff.current
     ) {
       return;
     }
@@ -372,8 +377,9 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
     const p = pullState.current.p;
     const h = hoverState.current.p;
     if (p > 0.12) wasPulledOut.current = true;
-    if (!active && wasPulledOut.current && p < CLOSE_HANDOFF_P) {
+    if (!active && (wasPulledOut.current || needsRetractHandoff.current) && p < CLOSE_HANDOFF_P) {
       wasPulledOut.current = false;
+      needsRetractHandoff.current = false;
       onRetracted?.();
     }
 

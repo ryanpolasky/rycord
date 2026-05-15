@@ -43,6 +43,7 @@ const BASE_FOV = 36;
 const ZOOM_MIN_FOV = 18;
 type WallArtFocus = "left" | "right" | null;
 const QUALITY_MODES: PerformanceMode[] = ["auto", "low", "medium", "high"];
+const ADMIN_COG_DOUBLE_TAP_MS = 180;
 type LibraryMode = "collection" | "wantlist";
 type WantlistStatus = "idle" | "loading" | "ready" | "error";
 
@@ -61,6 +62,15 @@ function isReservedCell(col: number, row: number, slot: { col: number; row: numb
   if (!slot) return false;
   if (row !== slot.row) return false;
   return col >= slot.col - 1 && col <= slot.col + 1;
+}
+
+function recordIndexFromId(recordId: string | null, total: number): number | null {
+  if (!recordId) return null;
+  const match = /-(\d+)$/.exec(recordId);
+  if (!match) return null;
+  const index = parseInt(match[1], 10);
+  if (!Number.isInteger(index) || index < 0 || index >= total) return null;
+  return index;
 }
 
 type Props = {
@@ -150,6 +160,10 @@ export default function Scene({
       return;
     }
     if (activeId && activeId !== nextId) {
+      if (recordIndexFromId(activeId, activeRecords.length) === null) {
+        setActiveId(nextId);
+        return;
+      }
       pendingActiveIdRef.current = nextId;
       setActiveId(null);
       return;
@@ -185,6 +199,10 @@ export default function Scene({
     const nextId = pendingActiveIdRef.current;
     if (!nextId) return;
     pendingActiveIdRef.current = null;
+    if (recordIndexFromId(nextId, activeRecords.length) === null) {
+      setActiveId(null);
+      return;
+    }
     setActiveId(nextId);
   };
 
@@ -230,9 +248,11 @@ export default function Scene({
       if (e.key === "ArrowLeft") delta = -1;
       else if (e.key === "ArrowRight") delta = 1;
       else return;
-      const m = /-(\d+)$/.exec(sourceId);
-      if (!m) return;
-      const idx = parseInt(m[1], 10);
+      const idx = recordIndexFromId(sourceId, activeRecords.length);
+      if (idx === null) {
+        clearActiveRecord();
+        return;
+      }
       const nextIdx = idx + delta;
       if (nextIdx < 0 || nextIdx >= activeRecords.length) return;
       e.preventDefault();
@@ -411,10 +431,8 @@ export default function Scene({
   // activeId is in the form `<release_id>-<index>` (see VinylRecord key below).
   // Look up the underlying record by parsing back the trailing index.
   const active = (() => {
-    if (!activeId) return null;
-    const m = /-(\d+)$/.exec(activeId);
-    if (!m) return null;
-    const idx = parseInt(m[1], 10);
+    const idx = recordIndexFromId(activeId, activeRecords.length);
+    if (idx === null) return null;
     return activeRecords[idx] ?? null;
   })();
 
@@ -1180,13 +1198,16 @@ function QualityGear({
   const [adminStatus, setAdminStatus] = useState("");
   const [adminBusy, setAdminBusy] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const lastCogClickAtRef = useRef(0);
 
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (target instanceof Node && rootRef.current?.contains(target)) return;
+      lastCogClickAtRef.current = 0;
       setOpen(false);
+      setAdminOpen(false);
     };
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
@@ -1271,6 +1292,27 @@ function QualityGear({
       setAdminStatus(err instanceof Error ? err.message : "cover override failed");
     } finally {
       setAdminBusy(null);
+    }
+  };
+
+  const handleCogClick = () => {
+    const now = performance.now();
+    const quickSecondTap = now - lastCogClickAtRef.current <= ADMIN_COG_DOUBLE_TAP_MS;
+    lastCogClickAtRef.current = now;
+
+    if (quickSecondTap) {
+      setOpen(true);
+      setAdminOpen(true);
+      setAdminStatus("");
+      return;
+    }
+
+    const nextOpen = !open;
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      lastCogClickAtRef.current = 0;
+      setAdminOpen(false);
+      setAdminStatus("");
     }
   };
 
@@ -1414,22 +1456,14 @@ function QualityGear({
                 </div>
               ) : null}
             </div>
-          ) : (
-            <div className="mt-2 font-sans text-[9px] uppercase tracking-[0.18em] text-inkSoft/45">
-              double-click cog for admin
-            </div>
-          )}
+          ) : null}
         </div>
       )}
       <button
         type="button"
         aria-label="Quality settings"
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        onDoubleClick={() => {
-          setOpen(true);
-          setAdminOpen(true);
-        }}
+        onClick={handleCogClick}
         className="grid h-9 w-9 place-items-center rounded-full border border-inkSoft/15 bg-[#120d09]/45 font-sans text-sm text-inkSoft/60 shadow-[0_10px_34px_rgba(0,0,0,0.22)] backdrop-blur-md transition hover:border-inkSoft/25 hover:bg-[#120d09]/65 hover:text-inkSoft/85"
       >
         ⚙
