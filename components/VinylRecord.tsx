@@ -198,6 +198,14 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
 
   const backMap = realBackMap ?? proceduralBackMap;
 
+  // the back map starts null and appears on first activation. three only
+  // compiles USE_MAP into the shader when a map is present, and assigning
+  // .map later does not retrigger that, so the face would stay untextured.
+  const backMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  useEffect(() => {
+    if (backMatRef.current) backMatRef.current.needsUpdate = true;
+  }, [backMap]);
+
   useEffect(() => () => {
     proceduralCoverMap?.dispose();
     spineMap?.dispose();
@@ -453,7 +461,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
       <mesh castShadow={quality !== "low"} receiveShadow={quality !== "low"} geometry={JACKET_GEOMETRY}>
         {/* +x cover front, -x back, +y top edge, -y bottom, +z spine, -z back edge */}
         <meshStandardMaterial attach="material-0" map={coverMap} roughness={0.55} metalness={0.04} />
-        <meshStandardMaterial attach="material-1" map={backMap} color={backMap ? "#ffffff" : edgeColor} roughness={0.55} metalness={0.04} />
+        <meshStandardMaterial ref={backMatRef} attach="material-1" map={backMap} color={backMap ? "#ffffff" : edgeColor} roughness={0.55} metalness={0.04} />
         <meshStandardMaterial attach="material-2" color={topEdgeColor} roughness={1.0} metalness={0} />
         <meshStandardMaterial attach="material-3" color={edgeColor} roughness={0.9} />
         <meshStandardMaterial attach="material-4" map={spineMap} roughness={0.7} metalness={0.02} />
