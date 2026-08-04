@@ -7,7 +7,7 @@ import {
   useFrame,
   useThree,
 } from "@react-three/fiber";
-import { Text } from "@react-three/drei";
+import CanvasText from "./CanvasText";
 import {
   bumpIntensity,
   setLedColor,
@@ -440,25 +440,17 @@ function RemoteButton({
           />
         </mesh>
         {btn.label && (
-          <Text
+          <CanvasText
             position={[0, 0.0008, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
             fontSize={radius * 0.7}
-            color={btn.color === "#f5f3ee" ? "#000000" : "#000000"}
+            color="#000000"
             anchorX="center"
             anchorY="middle"
-            // The label glyphs sit OVER the button face. We don't want
-            // them to swallow clicks — without `raycast={null}` r3f
-            // raycasts the Text mesh first, finds no onClick handler,
-            // and the click bubbles to the outer remote group's
-            // `handleBodyClick` (a no-op when the remote is open).
-            // Result: pressing dead-center on a button label sometimes
-            // does nothing. Disabling raycast on the label sends the
-            // click through to the button face below.
-            raycast={() => null}
+            textAlign="center"
           >
             {btn.label}
-          </Text>
+          </CanvasText>
         )}
       </group>
     );
@@ -496,7 +488,7 @@ function RemoteButton({
         <circleGeometry args={[radius, 24]} />
         <meshStandardMaterial color={dimHex(buttonColor, dim)} roughness={0.7} />
       </mesh>
-      <Text
+      <CanvasText
         position={[0, 0.0008, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
         fontSize={radius * 0.42}
@@ -504,12 +496,10 @@ function RemoteButton({
         anchorX="center"
         anchorY="middle"
         maxWidth={radius * 2.4}
-        // Disable raycast on label so clicks pass through to the button
-        // face below. See the matching note on the color buttons above.
-        raycast={() => null}
+        textAlign="center"
       >
         {btn.label}
-      </Text>
+      </CanvasText>
     </group>
   );
 }

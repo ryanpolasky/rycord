@@ -7,7 +7,7 @@ import {
   useFrame,
   useThree,
 } from "@react-three/fiber";
-import { Text } from "@react-three/drei";
+import CanvasText from "./CanvasText";
 import {
   setPaperOpen,
   useLedState,
@@ -203,7 +203,7 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
       </mesh>
 
       {/* local -z is the top edge once summoned, so the text starts there */}
-      <Text
+      <CanvasText
         position={[0, faceY, -D / 2 + 0.011]}
         rotation={[-Math.PI / 2, 0, 0]}
         fontSize={0.0046}
@@ -213,11 +213,9 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
         maxWidth={W - 0.014}
         lineHeight={1.35}
         letterSpacing={0.01}
-        // otherwise glyph clicks hit this mesh and bubble to onPointerMissed
-        raycast={() => null}
       >
         {MESSAGE_LINES}
-      </Text>
+      </CanvasText>
 
       {/* invisible but still raycasts, so the whole strip is a hit target */}
       <mesh
@@ -230,7 +228,7 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
         <planeGeometry args={[W - 0.012, 0.014]} />
         <meshBasicMaterial transparent opacity={0} />
       </mesh>
-      <Text
+      <CanvasText
         position={[0, faceY, D / 2 - 0.013]}
         rotation={[-Math.PI / 2, 0, 0]}
         fontSize={0.01}
@@ -238,10 +236,10 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
         anchorX="center"
         anchorY="middle"
         letterSpacing={0.02}
-        raycast={() => null}
+        textAlign="center"
       >
-        → click me!
-      </Text>
+        {"→ click me!"}
+      </CanvasText>
     </group>
   );
 }
