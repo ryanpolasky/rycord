@@ -5,15 +5,10 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { PerformanceTier } from "@/lib/performance";
 
-// Tiny floating dust particles backlit by the imaginary lamp — almost
-// invisible, but lend a "there's air in this room" feeling.
-
 const COUNT = 60;
 
-// Dust drift is intentionally slow (per-mote speeds top out at ~0.12 rad/s),
-// so a smooth 60fps update is wasted budget on this many particles. Cap at
-// ~30fps: the eye reads slow particle drift just as cleanly at 30 as 60,
-// but we halve the per-frame matrix-write work + instanceMatrix uploads.
+// the drift is slow enough that 30fps reads the same as 60, and halves the
+// per-frame matrix writes and instanceMatrix uploads
 const DUST_UPDATE_INTERVAL = 1 / 30;
 
 export default function DustMotes({ tier = "high" }: { tier?: PerformanceTier }) {
@@ -44,7 +39,6 @@ export default function DustMotes({ tier = "high" }: { tier?: PerformanceTier })
       const y = s.y + Math.cos(t * s.speed * 0.7 + s.phase) * 0.03;
       const z = s.z + Math.sin(t * s.speed * 0.5 + s.phase * 1.4) * 0.02;
       dummy.position.set(x, y, z);
-      // very subtle dust — tiny sub-millimetre scale, gently pulsing
       dummy.scale.setScalar(0.00025 + Math.sin(t + s.phase) * 0.00008 + 0.00015);
       dummy.updateMatrix();
       mesh.current.setMatrixAt(i, dummy.matrix);

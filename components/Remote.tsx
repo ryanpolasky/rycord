@@ -116,6 +116,28 @@ const GRID: Btn[][] = [
   ],
 ];
 
+// Reused every frame so the pose maths allocates nothing. Safe as module
+// state because each useFrame pass reads and writes these synchronously.
+const SCRATCH = {
+  camDir: new THREE.Vector3(),
+  forward: new THREE.Vector3(),
+  openPos: new THREE.Vector3(),
+  stowedPos: new THREE.Vector3(),
+  yAxis: new THREE.Vector3(),
+  proj: new THREE.Vector3(),
+  screenUp: new THREE.Vector3(),
+  zAxis: new THREE.Vector3(),
+  xAxis: new THREE.Vector3(),
+  euler: new THREE.Euler(),
+  stowedQ: new THREE.Quaternion(),
+  summonedQ: new THREE.Quaternion(),
+  basis: new THREE.Matrix4(),
+};
+
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const DOWN_NUDGE = new THREE.Vector3(0, -0.04, 0);
+const SETTLE_EPS = 0.0005;
+
 export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
   const groupRef = useRef<THREE.Group>(null);
   const { camera } = useThree();
@@ -127,6 +149,7 @@ export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
 
   // pressed button bookkeeping for the dip-in-out tactile animation
   const pressedRef = useRef<{ key: string; until: number } | null>(null);
+  const stowedWritten = useRef(false);
 
   useFrame((state, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
@@ -134,32 +157,47 @@ export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
     // critically damped easing
     const omega = 5.0;
     t.current += (target - t.current) * Math.min(1, dt * omega);
+    if (Math.abs(target - t.current) < SETTLE_EPS) t.current = target;
+
+    // Runs before the pose early-out below so a pressed button always
+    // releases even while the remote is stowed.
+    if (pressedRef.current && performance.now() / 1000 > pressedRef.current.until) {
+      pressedRef.current = null;
+      setTick((x) => x + 1);
+    }
 
     if (!groupRef.current) return;
+
+    // At t=0 the pose is the caller's fixed stowed transform, so once it has
+    // been written it cannot change until the remote is summoned again.
+    if (t.current === 0) {
+      if (stowedWritten.current) return;
+    } else {
+      stowedWritten.current = false;
+    }
 
     // Build the summoned pose: anchored in front of the camera, slightly
     // below center so the remote sits in the lower-half of the frame and
     // doesn't cover the records.
     const camPos = camera.position;
-    const camDir = new THREE.Vector3();
+    const camDir = SCRATCH.camDir;
     camera.getWorldDirection(camDir);
     // Summon a touch FARTHER from camera (so the remote appears slightly
     // smaller and the full 6-row grid fits comfortably in frame) and
     // RAISE it relative to the camera's lookAt so the bottom row of
     // buttons is well above the viewport bottom edge.
-    const forward = camDir.clone().multiplyScalar(0.62);
-    const down = new THREE.Vector3(0, -0.04, 0);
-    const openPos = camPos.clone().add(forward).add(down);
+    const forward = SCRATCH.forward.copy(camDir).multiplyScalar(0.62);
+    const openPos = SCRATCH.openPos.copy(camPos).add(forward).add(DOWN_NUDGE);
 
     // Interpolate position between stowed (`position`) and summoned (`openPos`)
-    const stowedPos = new THREE.Vector3(position[0], position[1], position[2]);
+    const stowedPos = SCRATCH.stowedPos.set(position[0], position[1], position[2]);
     const cur = stowedPos.lerp(openPos, t.current);
     groupRef.current.position.copy(cur);
 
     // Interpolate rotation between stowed (flat on floor) and summoned
     // (held up to face the camera).
-    const stowedQ = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(rotation[0], rotation[1], rotation[2]),
+    const stowedQ = SCRATCH.stowedQ.setFromEuler(
+      SCRATCH.euler.set(rotation[0], rotation[1], rotation[2]),
     );
 
     // Build the summoned orientation by composing the world-frame axes we
@@ -172,33 +210,22 @@ export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
     // This is the only right-handed assignment that keeps the buttons
     // upright AND not-mirrored: face=+Y / top=+Z / right=+X would form a
     // left-handed frame, so we must use -Z for screen-up rather than +Z.
-    const dirToCamera = camPos.clone().sub(openPos).normalize();
-    const worldUp = new THREE.Vector3(0, 1, 0);
-    const yAxis = dirToCamera.clone();
-    const screenUp = worldUp
-      .clone()
-      .sub(yAxis.clone().multiplyScalar(worldUp.dot(yAxis)))
+    const yAxis = SCRATCH.yAxis.copy(camPos).sub(openPos).normalize();
+    const screenUp = SCRATCH.screenUp
+      .copy(WORLD_UP)
+      .sub(SCRATCH.proj.copy(yAxis).multiplyScalar(WORLD_UP.dot(yAxis)))
       .normalize();
-    const zAxis = screenUp.clone().negate(); // local -Z = screen up
-    const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
+    const zAxis = SCRATCH.zAxis.copy(screenUp).negate(); // local -Z = screen up
+    const xAxis = SCRATCH.xAxis.crossVectors(yAxis, zAxis).normalize();
     // Re-orthogonalize zAxis against tiny float drift.
     zAxis.crossVectors(xAxis, yAxis).normalize();
-    const summonedM = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
-    const summonedQ = new THREE.Quaternion().setFromRotationMatrix(summonedM);
+    const summonedM = SCRATCH.basis.makeBasis(xAxis, yAxis, zAxis);
+    const summonedQ = SCRATCH.summonedQ.setFromRotationMatrix(summonedM);
 
     const q = stowedQ.slerp(summonedQ, t.current);
     groupRef.current.quaternion.copy(q);
 
-    // Idle pulse render to keep state up to date (for `pressed` button visuals).
-    // IMPORTANT: `until` is written using `performance.now() / 1000` in
-    // `onButton` below, so we must compare against the SAME wall-clock
-    // here — NOT `state.clock.elapsedTime`, which is a three.js Clock
-    // with a different baseline (would never expire and the button would
-    // stay dim forever).
-    if (pressedRef.current && performance.now() / 1000 > pressedRef.current.until) {
-      pressedRef.current = null;
-      setTick((x) => x + 1);
-    }
+    if (t.current === 0) stowedWritten.current = true;
   });
 
   const handleBodyClick = (e: { stopPropagation: () => void }) => {

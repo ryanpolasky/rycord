@@ -13,35 +13,44 @@ import {
   useLedState,
 } from "@/lib/ledStore";
 
-// A folded-down scrap of paper tucked next to the book stack. Works exactly
-// like the LED remote: clicking the scrap "summons" it - it lifts off the
-// floor and floats up to face the camera so the user can read a short note
-// from me, with a clickable LinkedIn line at the bottom. Clicking empty
-// space puts it back on the floor.
-//
-// Picking up the paper auto-dismisses the remote (and vice versa) via the
-// mutual-exclusion logic in `setPaperOpen` / `setRemoteOpen`.
+// a scrap of paper on the rug. clicking summons it to face the camera,
+// clicking empty space puts it back. mutually exclusive with the remote.
 
 type Props = {
-  /** World position where the paper rests on the rug. */
+  // where the paper rests on the rug
   position: [number, number, number];
-  /** Stowed-pose Euler rotation in radians. A small Y rotation makes the
-   *  scrap look casually dropped rather than perfectly axis-aligned. */
+  // stowed euler in radians; a small y rotation reads as casually dropped
   rotation?: [number, number, number];
 };
 
-// Physical dimensions in meters. A torn corner of a notebook page - not
-// quite a full sheet, slightly wider than the LED remote so the prose has
-// room to breathe.
-const W = 0.092; // 9.2 cm wide
-const D = 0.118; // 11.8 cm tall
-const H = 0.0010; // 1 mm thick
+// metres
+const W = 0.092;
+const D = 0.118;
+const H = 0.0010;
 
 const LINKEDIN_URL = "https://linkedin.com/in/ryan-polasky";
 
-// The note itself. Casual, lowercase to match the hand-jotted vibe. Keep
-// this short - too much text and the user can't read it comfortably at the
-// summoned distance.
+// reused every frame so the pose maths allocates nothing
+const S = {
+  camDir: new THREE.Vector3(),
+  forward: new THREE.Vector3(),
+  openPos: new THREE.Vector3(),
+  stowedPos: new THREE.Vector3(),
+  yAxis: new THREE.Vector3(),
+  proj: new THREE.Vector3(),
+  screenUp: new THREE.Vector3(),
+  zAxis: new THREE.Vector3(),
+  xAxis: new THREE.Vector3(),
+  euler: new THREE.Euler(),
+  stowedQ: new THREE.Quaternion(),
+  summonedQ: new THREE.Quaternion(),
+  basis: new THREE.Matrix4(),
+};
+
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const UP_NUDGE = new THREE.Vector3(0, 0.02, 0);
+const SETTLE_EPS = 0.0005;
+
 const MESSAGE_LINES = [
   "hey, i'm ryan :)",
   "",
@@ -61,37 +70,38 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
   const { camera } = useThree();
   const { paperOpen } = useLedState();
 
-  // 0 = stowed flat on rug, 1 = summoned in front of camera. Eased every
-  // frame toward whichever pose `paperOpen` selects.
+  // 0 = stowed on rug, 1 = summoned in front of camera
   const t = useRef(0);
-  // Force a re-render on hover state changes (cursor/link affordance).
   const [, setTick] = useState(0);
   const hoverLinkRef = useRef(false);
+  const stowedWritten = useRef(false);
 
   useFrame((_state, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
     const target = paperOpen ? 1 : 0;
-    // Critically damped - same easing constant the remote uses so the two
-    // pickups feel like they share a physics budget.
+    // matches the remote so both pickups feel the same
     const omega = 5.0;
     t.current += (target - t.current) * Math.min(1, dt * omega);
+    if (Math.abs(target - t.current) < SETTLE_EPS) t.current = target;
 
     if (!groupRef.current) return;
 
-    // Build the summoned pose: a touch in front of camera, slightly above
-    // the camera's lookAt so the message sits in the upper-middle of the
-    // frame (the LinkedIn line sits near the lower-middle, comfortably
-    // above the footer HUD).
-    const camPos = camera.position;
-    const camDir = new THREE.Vector3();
-    camera.getWorldDirection(camDir);
-    const forward = camDir.clone().multiplyScalar(0.48);
-    // Lift slightly so the paper centers on the viewport's vertical axis
-    // even when the camera is pitched a hair downward.
-    const up = new THREE.Vector3(0, 0.02, 0);
-    const openPos = camPos.clone().add(forward).add(up);
+    // at t=0 the pose is a fixed transform, so it only needs writing once
+    if (t.current === 0) {
+      if (stowedWritten.current) return;
+    } else {
+      stowedWritten.current = false;
+    }
 
-    const stowedPos = new THREE.Vector3(
+    // slightly above the camera's lookAt, so the note sits upper-middle and
+    // the linkedin line clears the footer hud
+    const camPos = camera.position;
+    const camDir = S.camDir;
+    camera.getWorldDirection(camDir);
+    const forward = S.forward.copy(camDir).multiplyScalar(0.48);
+    const openPos = S.openPos.copy(camPos).add(forward).add(UP_NUDGE);
+
+    const stowedPos = S.stowedPos.set(
       position[0],
       position[1],
       position[2],
@@ -99,36 +109,32 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
     const cur = stowedPos.lerp(openPos, t.current);
     groupRef.current.position.copy(cur);
 
-    // Stowed orientation = the casual flat-on-floor rotation the caller
-    // passed in. Summoned orientation = paper facing the camera with text
-    // upright on screen. Same basis-construction approach as the remote;
-    // see the long comment there for the right-handed-frame caveat.
-    const stowedQ = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(rotation[0], rotation[1], rotation[2]),
+    const stowedQ = S.stowedQ.setFromEuler(
+      S.euler.set(rotation[0], rotation[1], rotation[2]),
     );
 
-    const dirToCamera = camPos.clone().sub(openPos).normalize();
-    const worldUp = new THREE.Vector3(0, 1, 0);
-    const yAxis = dirToCamera.clone();
-    const screenUp = worldUp
-      .clone()
-      .sub(yAxis.clone().multiplyScalar(worldUp.dot(yAxis)))
+    const yAxis = S.yAxis.copy(camPos).sub(openPos).normalize();
+    const screenUp = S.screenUp
+      .copy(WORLD_UP)
+      .sub(S.proj.copy(yAxis).multiplyScalar(WORLD_UP.dot(yAxis)))
       .normalize();
-    const zAxis = screenUp.clone().negate(); // local -Z maps to screen up
-    const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
+    // local -z maps to screen up
+    const zAxis = S.zAxis.copy(screenUp).negate();
+    const xAxis = S.xAxis.crossVectors(yAxis, zAxis).normalize();
     zAxis.crossVectors(xAxis, yAxis).normalize();
-    const summonedM = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
-    const summonedQ = new THREE.Quaternion().setFromRotationMatrix(summonedM);
+    const summonedM = S.basis.makeBasis(xAxis, yAxis, zAxis);
+    const summonedQ = S.summonedQ.setFromRotationMatrix(summonedM);
 
     const q = stowedQ.slerp(summonedQ, t.current);
     groupRef.current.quaternion.copy(q);
+
+    if (t.current === 0) stowedWritten.current = true;
   });
 
   const onBodyClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     if (!paperOpen) {
-      // setPaperOpen handles the mutual-exclusion with the remote so we
-      // don't need to call setRemoteOpen(false) explicitly here.
+      // setPaperOpen already handles mutual exclusion with the remote
       setPaperOpen(true);
     }
   };
@@ -136,9 +142,7 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
   const onLinkClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     if (!paperOpen) {
-      // If the user happens to click on the LinkedIn region while the paper
-      // is stowed, treat it as a normal summon - they're not yet at a
-      // legible distance and almost certainly didn't mean to navigate.
+      // not legible yet, so this can't have been a deliberate navigation
       setPaperOpen(true);
       return;
     }
@@ -170,8 +174,7 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
     }
   };
 
-  // Z position of the top face - text sits just above the paper surface to
-  // avoid Z-fighting with the body mesh.
+  // just above the surface to avoid z-fighting with the body mesh
   const faceY = H / 2 + 0.0006;
 
   return (
@@ -181,8 +184,7 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
       onPointerOver={onBodyPointerOver}
       onPointerOut={onBodyPointerOut}
     >
-      {/* paper body - warm off-white, very matte. Slight emissive so the
-          page reads in the dim room without needing a dedicated light. */}
+      {/* emissive so the page reads in the dim room without its own light */}
       <mesh receiveShadow castShadow>
         <boxGeometry args={[W, H, D]} />
         <meshStandardMaterial
@@ -194,17 +196,13 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
         />
       </mesh>
 
-      {/* subtle aged-edge tint - a slightly darker rim under the paper to
-          fake a deckled edge / sit it on the rug without floating. */}
+      {/* darker rim so the scrap sits on the rug instead of floating */}
       <mesh position={[0, -H * 0.45, 0]}>
         <boxGeometry args={[W + 0.0008, H * 0.5, D + 0.0008]} />
         <meshStandardMaterial color="#d8c8a8" roughness={1.0} />
       </mesh>
 
-      {/* the message - top-anchored so it starts at the upper edge of the
-          paper and flows downward. Local -Z is the "top" of the paper
-          (the end that maps to screen-up after summoning), so a small
-          negative Z places the first line near that edge. */}
+      {/* local -z is the top edge once summoned, so the text starts there */}
       <Text
         position={[0, faceY, -D / 2 + 0.011]}
         rotation={[-Math.PI / 2, 0, 0]}
@@ -215,18 +213,13 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
         maxWidth={W - 0.014}
         lineHeight={1.35}
         letterSpacing={0.01}
-        // Disable raycast on the text so clicks pass through to the body
-        // mesh - without this, clicks on the glyphs would land on the
-        // Text mesh (no handler) and bubble to onPointerMissed instead.
+        // otherwise glyph clicks hit this mesh and bubble to onPointerMissed
         raycast={() => null}
       >
         {MESSAGE_LINES}
       </Text>
 
-      {/* LinkedIn link - separate clickable region at the bottom of the
-          paper. The plane is invisible (opacity 0) but still raycasts, so
-          the whole bottom strip is a comfortable hit target around the
-          actual "linkedin.com/in/ryan-polasky" label. */}
+      {/* invisible but still raycasts, so the whole strip is a hit target */}
       <mesh
         position={[0, faceY - 0.0001, D / 2 - 0.013]}
         rotation={[-Math.PI / 2, 0, 0]}

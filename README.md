@@ -30,32 +30,32 @@ to bundled synthetic records.
 
 See `.env.example` for the full commented list.
 
-| var                  | required | purpose                                      |
-|----------------------|----------|----------------------------------------------|
-| `DISCOGS_USER`       | no       | Discogs username for the shelf               |
-| `DISCOGS_TOKEN`      | no       | Personal token for authenticated requests    |
-| `RYCORD_HIDDEN_RELEASE_IDS` | no | Comma/space-separated release IDs to hide    |
-| `RYCORD_ADMIN_PASSWORD` | no    | Password for hidden settings-cog admin tools |
-| `RYCORD_REFRESH_TOKEN` | no     | Secret required for manual Discogs refreshes |
-| `RYCORD_DATA_DIR`    | no       | Cache root, defaults to `./data`             |
-| `LASTFM_API_KEY`     | no       | Description fallback after Wikipedia         |
-| `OPENROUTER_API_KEY` | no       | Final AI fallback for album descriptions     |
-| `OPENROUTER_MODEL`   | no       | Comma-separated OpenRouter model chain       |
-| `MULTIPLY_RECORDS`   | no       | Dev-only shelf density test multiplier       |
+| var                         | required | purpose                                      |
+|-----------------------------|----------|----------------------------------------------|
+| `DISCOGS_USER`              | no       | Discogs username for the shelf               |
+| `DISCOGS_TOKEN`             | no       | Personal token for authenticated requests    |
+| `RYCORD_HIDDEN_RELEASE_IDS` | no       | Comma/space-separated release IDs to hide    |
+| `RYCORD_ADMIN_PASSWORD`     | no       | Password for hidden settings-cog admin tools |
+| `RYCORD_REFRESH_TOKEN`      | no       | Secret required for manual Discogs refreshes |
+| `RYCORD_DATA_DIR`           | no       | Cache root, defaults to `./data`             |
+| `LASTFM_API_KEY`            | no       | Description fallback after Wikipedia         |
+| `OPENROUTER_API_KEY`        | no       | Final AI fallback for album descriptions     |
+| `OPENROUTER_MODEL`          | no       | Comma-separated OpenRouter model chain       |
+| `MULTIPLY_RECORDS`          | no       | Dev-only shelf density test multiplier       |
 
 ## cache model
 
 Normal app loads read local cache first. Rycord only calls upstream APIs when a
 needed cache file does not exist yet.
 
-| path                       | contents                                                   |
-|----------------------------|------------------------------------------------------------|
-| `data/collections/*.json`  | Normalized collection entries and raw Discogs rows         |
+| path                        | contents                                                   |
+|-----------------------------|------------------------------------------------------------|
+| `data/collections/*.json`   | Normalized collection entries and raw Discogs rows         |
 | `data/hidden-releases.json` | Optional display blacklist of Discogs release IDs          |
-| `data/releases/*.json`     | Release metadata, notes, tracklist, durations, raw payload |
-| `data/descriptions/*.json` | Wikipedia, Last.fm, or OpenRouter description payloads     |
-| `data/palettes/*.json`     | Derived cover palettes                                     |
-| `data/covers/*`            | Proxied cover image binaries and metadata                  |
+| `data/releases/*.json`      | Release metadata, notes, tracklist, durations, raw payload |
+| `data/descriptions/*.json`  | Wikipedia, Last.fm, or OpenRouter description payloads     |
+| `data/palettes/*.json`      | Derived cover palettes                                     |
+| `data/covers/*`             | Proxied cover image binaries and metadata                  |
 
 Description lookup order is:
 

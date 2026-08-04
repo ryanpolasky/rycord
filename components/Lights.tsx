@@ -5,32 +5,14 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { PerformanceTier } from "@/lib/performance";
 
-// All the room lighting in one place, with subtle animation so the scene
-// reads as "alive" not "baked." Cozy moody mix:
-//
-//   1. cool rainy-window key from upper-left (soft, gentle pulse)
-//   2. warm lamp point light from off-camera right (subtle flicker, like
-//      incandescent + slight position drift, like the lamp is rocking)
-//   3. warm fill from front-left (lamp bounce off facing pages of records)
-//   4. dim warm ambient
-//
-// The rain-shadow swipe (translucent ripple plane on the wall) lives in
-// Scene.tsx because it's a mesh; this file is lights only.
-
-// All the oscillators below are slow (<1Hz on average, fastest is 9Hz on the
-// lamp's micro-wobble). Updating their intensities every frame at 60fps is
-// wasteful — the human eye can't distinguish a smooth 60fps sine from a
-// 20fps stepped one at these frequencies. Throttling the body of useFrame
-// to ~20fps (every ~50ms) gives us a 3× reduction in light-update work
-// without any perceptible difference to the room's "breathing" feel.
+// every oscillator here is under 1hz, so stepping them at 20fps is
+// indistinguishable from 60 and cuts the light-update work by 3x
 const LIGHTS_UPDATE_INTERVAL = 1 / 20;
 
 export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
   const lamp = useRef<THREE.PointLight>(null);
   const lampFill = useRef<THREE.PointLight>(null);
   const key = useRef<THREE.DirectionalLight>(null);
-  // Accumulator for the 20fps throttle. We hold off applying the next
-  // intensity update until at least LIGHTS_UPDATE_INTERVAL has elapsed.
   const accum = useRef(0);
 
   useFrame((state, rawDt) => {
@@ -39,7 +21,7 @@ export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
     accum.current = 0;
     const t = state.clock.elapsedTime;
 
-    // Warm lamp — incandescent flicker (slow + a tiny faster wobble)
+    // incandescent flicker: slow drift plus a faster wobble
     if (lamp.current) {
       const lampBase = tier === "low" ? 2.15 : 1.75;
       const slow = Math.sin(t * 0.55) * 0.08;
@@ -54,7 +36,6 @@ export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
     }
 
     if (key.current) {
-      // rainy-window key — almost just a fill now, slow cloud pulse
       const keyBase = tier === "low" ? 0.48 : 0.32;
       key.current.intensity = keyBase + Math.sin(t * 0.18) * 0.07 + Math.sin(t * 0.07) * 0.04;
     }
@@ -62,9 +43,7 @@ export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
 
   return (
     <>
-      {/* dim cool rainy-window fill. Shadow map at 1024² — the previous
-          2048² was overkill for a sub-1m room and quadrupled the shadow
-          fragment work every frame for no visible gain. */}
+      {/* 1024² shadow map; 2048² is invisible in a sub-1m room and 4x the cost */}
       <directionalLight
         ref={key}
         position={[-2.2, 2.0, 1.4]}
@@ -83,13 +62,8 @@ export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
         shadow-radius={6}
       />
 
-      {/* warm lamp from off-camera right — closer to the shelf so the cell
-          interior gets lit. This is the "cozy" centerpiece light.
-          NOTE: castShadow intentionally OMITTED here. PointLight shadow
-          maps require a cube map (6 faces), so enabling shadows on this
-          light alone costs 6× a directional. The DirectionalLight key
-          above already handles the room's primary shadow language; the
-          lamp's role is warmth/glow, not silhouette definition. */}
+      {/* no castShadow on purpose: a point light needs a 6-face cube map,
+          and the directional above already carries the room's shadows */}
       <pointLight
         ref={lamp}
         position={[0.55, 0.0, 0.35]}
@@ -99,7 +73,7 @@ export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
         decay={1.35}
       />
 
-      {/* warm fill from front-left — bouncing off facing pages */}
+      {/* warm fill bouncing off the facing pages */}
       <pointLight
         ref={lampFill}
         position={[-0.45, 0.0, 0.4]}
@@ -109,7 +83,7 @@ export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
         decay={1.5}
       />
 
-      {/* a tiny rim from the upper-left, like a wall sconce */}
+      {/* wall-sconce rim */}
       {tier === "high" && (
         <pointLight
           position={[-1.1, 0.55, 0.4]}
@@ -120,17 +94,11 @@ export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
         />
       )}
 
-      {/* Warm hemisphere fill — lifts the floor evenly across its full extent
-          so we don't get the dark-edge / bright-under-the-rug split caused by
-          the warm lamp's point-light falloff. Because hemisphere lights weight
-          by surface normal, this hits the FLOOR (normal +Y) at full strength
-          while only contributing half to the back wall (normal +Z, side-on),
-          which preserves the moody contrast on the wall behind the shelf.
-          Sky color matches the floor's wood tone so the fill reads as
-          "ambient wood bounce" rather than an obvious extra lamp. */}
+      {/* normal-weighted, so it lifts the floor evenly without flattening
+          the back wall the way another lamp would */}
       <hemisphereLight color="#a47450" groundColor="#1a0f08" intensity={tier === "low" ? 1.05 : 0.55} />
 
-      {/* very dim warm ambient — just enough so deep shadows aren't pure black */}
+      {/* just enough that deep shadows aren't pure black */}
       <ambientLight intensity={tier === "low" ? 0.36 : 0.14} color="#f0d2a2" />
     </>
   );
