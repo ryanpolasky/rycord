@@ -7,8 +7,6 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        // Crawlers have no reason to hit the internal data endpoints; keep
-        // them out of the index so API payloads never surface in search.
         disallow: ["/api/"],
       },
     ],

@@ -1,6 +1,3 @@
-// synthetic fallback records used when discogs is unavailable.
-// covers are generated procedurally so the fallback can ship without third-party artwork.
-
 export type DemoRecord = {
   id: string;
   artist: string;
@@ -11,9 +8,6 @@ export type DemoRecord = {
   palette: { bg: string; ink: string; accent: string };
   genre: string;
   country: string;
-  // Optional: same-origin URL pointing at the real album cover image. When
-  // present, the jacket front face uses the real artwork; the spine stays
-  // procedural (drawn from `palette`) for a consistent shelf aesthetic.
   coverUrl?: string;
 };
 

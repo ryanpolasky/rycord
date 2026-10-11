@@ -1,7 +1,3 @@
-// Runtime state for the LED strip. The in-scene RGB remote mutates this; the
-// strip + bounce-lights read it every frame via `getLedState()`. Default values
-// come from `lib/accent.ts`.
-
 "use client";
 
 import { useSyncExternalStore } from "react";
@@ -10,7 +6,7 @@ import { ACCENT_COLOR, ACCENT_INTENSITY, PATTERN, type Pattern } from "./accent"
 type State = {
   pattern: Pattern;
   enabled: boolean;
-  color: string;          // hex (#rrggbb) — the primary accent
+  color: string;          // hex (#rrggbb), the primary accent
   intensity: number;      // brightness multiplier, ~0.4 to 2.5
   remoteOpen: boolean;    // whether the remote is "summoned" to the foreground
   paperOpen: boolean;     // whether the paper scrap is "picked up" to read
@@ -35,9 +31,7 @@ export function getLedState(): State {
   return state;
 }
 
-// Used by accent.ts so per-frame color math doesn't have to round-trip through
-// React. These return raw values; if the store doesn't exist on the server,
-// callers fall back to the static defaults.
+// read per frame without going through react
 export function getActiveColor(): string {
   return state.color;
 }
@@ -51,9 +45,6 @@ export function setLedPattern(p: Pattern) {
   emit();
 }
 
-// Advance to the next pattern in a fixed sequence — used by the FADE
-// specialty button on the remote, which acts like a "next preset" button
-// on a real chinesium RGB controller. Each press steps once.
 const STEP_SEQUENCE: Pattern[] = ["rainbow", "static", "breath", "chase", "split", "cycle"];
 export function stepLedPattern() {
   const i = STEP_SEQUENCE.indexOf(state.pattern);
@@ -62,16 +53,6 @@ export function stepLedPattern() {
   emit();
 }
 
-// ============================================================================
-// Specialty-button variant cycling.
-//
-// Each of FLASH / STROBE / FADE / SMOOTH on the remote cycles through
-// PALETTE-flavored variants. Pressing the same button advances; pressing
-// a different specialty button resets back to that category's variant 0.
-// We store one index per category so each button remembers where it is.
-//
-// 15 distinct LED looks across the four buttons.
-// ============================================================================
 const FLASH_VARIANTS: Pattern[] = ["strobeWhite", "strobeWarm", "strobeCool"];
 const STROBE_VARIANTS: Pattern[] = ["pulseRainbow", "pulsePastel", "pulseNeon"];
 const FADE_VARIANTS: Pattern[] = ["fadeRainbow", "fadeWarm", "fadeCool", "fadeSunset"];
@@ -113,9 +94,7 @@ export function bumpIntensity(delta: number) {
   emit();
 }
 
-// The remote and the paper scrap are both "picked up" pieces of UI that
-// float in front of the camera; only one can be held at a time. Opening
-// either one automatically dismisses the other so they don't overlap.
+// the remote and the paper can't both be held
 export function setRemoteOpen(open: boolean) {
   state = {
     ...state,

@@ -1,23 +1,15 @@
-// GET /api/artwork?url=<encoded absolute URL>
-//
-// Same-origin image proxy so we can load album art from CORS-unfriendly
-// hosts (Last.fm / Spotify / iTunes) as a WebGL texture. Without this the
-// browser blocks the image from being uploaded to a texture even if we set
-// crossOrigin="anonymous" on the <img>.
-//
-// A hostname allowlist keeps this from being used as an open image proxy —
-// only a small set of known music-art CDNs is permitted.
+// same-origin proxy so cors-unfriendly album art can be used as a webgl texture
 
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Only proxy images coming from one of these hosts. New upstream hosts can
-// be added here when we add new music sources.
+// allowlist so this can't be used as an open image proxy
 const ALLOWED_HOSTS = new Set<string>([
   // Last.fm image CDN
   "lastfm.freetls.fastly.net",
+  "lastfm-img.freetls.fastly.net",
   "lastfm-img2.akamaized.net",
   // Spotify album art CDN
   "i.scdn.co",
@@ -55,9 +47,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const upstream = await fetch(parsed.toString(), {
-      // Album art URLs are effectively immutable (content-addressed by the
-      // upstreams we allow), so we cache them aggressively at the Next
-      // layer too.
+      // art urls are content-addressed, so cache hard
       next: { revalidate: 60 * 60 * 24 },
       headers: { "user-agent": "rycord/0.1 +https://rycord.dev" },
     });
@@ -73,8 +63,6 @@ export async function GET(req: NextRequest) {
     return new NextResponse(buf, {
       headers: {
         "content-type": contentType,
-        // Serve directly from the Next cache + long browser cache; the
-        // URL is content-addressed so it's safe to treat as immutable.
         "cache-control":
           "public, max-age=86400, s-maxage=86400, immutable",
       },

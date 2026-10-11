@@ -1,9 +1,6 @@
 import * as THREE from "three";
 
-// troika renders text by generating SDFs in its own private WebGL1 context,
-// which hard-requires ANGLE_instanced_arrays. anti-fingerprinting browsers
-// refuse that extension, and troika's "JS fallback" still needs WebGL for the
-// final blit, so it dies too. canvas 2d has no such dependency.
+// troika needs a webgl1 context that anti-fingerprinting browsers refuse, canvas 2d doesn't
 
 // rasterised height of one line; world size is derived from this
 const FONT_PX = 64;
@@ -134,8 +131,7 @@ export function makeTextTexture(opts: TextTextureOptions): TextTextureResult | n
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  // NPOT without mipmaps is the one combination that is always safe, including
-  // on a WebGL1 fallback context
+  // NPOT without mipmaps is the one combination that is always safe, including on a WebGL1 fallback context
   texture.generateMipmaps = false;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;

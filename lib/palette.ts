@@ -1,13 +1,3 @@
-// Server-side palette extraction from an image buffer.
-//
-// We feed the image through sharp, downsample to 48x48, and pick three colors:
-//   bg     — dark average (background of the spine + cover-tinting)
-//   ink    — light average (lettering, accents)
-//   accent — most-saturated pixel from the mid-luminance band
-// These are the same three slots the procedural covers/spines already use,
-// so we can drop real-image-derived palettes into the existing pipeline with
-// zero changes downstream.
-
 import "server-only";
 import sharp from "sharp";
 
@@ -38,8 +28,6 @@ export async function paletteFromImage(buf: ArrayBuffer | Buffer): Promise<Palet
   const bgEnd = Math.max(1, Math.floor(N * 0.30));
   const bg = avgColor(pixels.slice(0, bgEnd));
 
-  // Average the top 20% for ink. Cap brightness so very-blown highlights
-  // don't push it to pure white (looks too clinical on a paper cover).
   const inkStart = Math.floor(N * 0.80);
   let ink = avgColor(pixels.slice(inkStart));
   ink = clampBrightness(ink, 235);
@@ -49,8 +37,7 @@ export async function paletteFromImage(buf: ArrayBuffer | Buffer): Promise<Palet
   const midEnd = Math.floor(N * 0.80);
   const mid = pixels.slice(midStart, midEnd);
   mid.sort((a, b) => sat(b[0], b[1], b[2]) - sat(a[0], a[1], a[2]));
-  // Pick top-3 most saturated and average — single most-saturated pixel can
-  // be noise.
+  // average the top 3, a single pixel can be noise
   const accent = avgColor(mid.slice(0, 3).length ? mid.slice(0, 3) : [pixels[Math.floor(N / 2)]]);
 
   return {

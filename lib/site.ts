@@ -1,7 +1,3 @@
-// Shared site-wide SEO constants. Anything SEO-adjacent (metadata, sitemap,
-// robots, manifest, OG images, JSON-LD) should pull from here so there is one
-// source of truth for the canonical URL, brand copy, and theme colors.
-
 const rawSiteUrl =
   process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "https://rycord.dev";
 

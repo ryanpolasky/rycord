@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { SITE, absoluteUrl } from "@/lib/site";
+import { sans, serif } from "@/lib/fonts";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -131,7 +132,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" dir="ltr">
+    <html lang="en" dir="ltr" className={`${sans.variable} ${serif.variable}`}>
       <head>
         <script
           type="application/ld+json"

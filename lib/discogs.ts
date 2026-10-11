@@ -1,14 +1,3 @@
-// Server-side Discogs API client.
-//
-// Discogs' public API returns a user's collection at /users/{username}/collection/folders/0/releases.
-// Folder 0 is the special "All" folder that includes every release in the collection.
-// Unauthenticated requests are rate-limited to 60/min — fine for a single user fetching
-// their own collection, though we persist results to disk to avoid repeat hits.
-//
-// No auth token is currently required — eggyb0i's collection is public. If we want to
-// support private collections later, plug a personal access token into DISCOGS_TOKEN
-// and we send it via the Authorization header.
-
 import "server-only";
 import { deleteCache, readJsonCache, safeCacheKey, writeJsonCache } from "@/lib/dataCache";
 import { deleteCachedAssets } from "@/lib/cachedAssets";
@@ -147,7 +136,7 @@ export async function fetchCollectionResult(username: string, options: FetchColl
   const cacheKey = safeCacheKey(username);
   const cached = await readJsonCache<CollectionCacheFile>("collections", `${cacheKey}.json`);
   if (!options.refresh && cached?.releases && Array.isArray(cached.releases)) {
-    return { releases: await applyCoverOverrides(await filterHiddenReleases(cached.releases)), source: "cache", prunedReleaseIds: [] };
+    return { releases: await applyCoverOverrides(await filterHiddenReleases(cached.releases.map((r) => ({ ...r, artist: tidyArtist(r.artist) })))), source: "cache", prunedReleaseIds: [] };
   }
 
   const headers: HeadersInit = { "User-Agent": USER_AGENT };
@@ -210,7 +199,7 @@ export async function fetchCollectionResult(username: string, options: FetchColl
       return {
         id: r.id,
         instanceId: r.instance_id ?? r.id,
-        artist: cleanArtist(artist),
+        artist: tidyArtist(artist),
         title: bi.title ?? "Untitled",
         year: bi.year ?? 0,
         label,
@@ -223,11 +212,7 @@ export async function fetchCollectionResult(username: string, options: FetchColl
     })
     .filter((r): r is DiscogsRelease => r !== null);
 
-  // Discogs returns releases in `added_at desc` order by default. Sort
-  // client-side so the shelf reads alphabetically by artist → album. The
-  // collator handles unicode + Japanese romaji + case-insensitivity sanely;
-  // strip leading "The " / "A " / "An " from the sort key so e.g. "The
-  // Beatles" files under B not T (record-store convention).
+  // record-store order: artist then title, ignoring leading articles
   const collator = new Intl.Collator("en", { sensitivity: "base", ignorePunctuation: true });
   normalized.sort((a, b) => {
     const aArtist = sortKey(a.artist);
@@ -255,7 +240,7 @@ export async function fetchWantlistResult(username: string, options: FetchCollec
   const cacheKey = safeCacheKey(username);
   const cached = await readJsonCache<WantlistCacheFile>("wantlists", `${cacheKey}.json`);
   if (!options.refresh && cached?.releases && Array.isArray(cached.releases)) {
-    return { releases: await applyCoverOverrides(await filterHiddenReleases(cached.releases)), source: "cache" };
+    return { releases: await applyCoverOverrides(await filterHiddenReleases(cached.releases.map((r) => ({ ...r, artist: tidyArtist(r.artist) })))), source: "cache" };
   }
 
   const headers: HeadersInit = { "User-Agent": USER_AGENT };
@@ -294,7 +279,7 @@ export async function fetchWantlistResult(username: string, options: FetchCollec
       return {
         id,
         instanceId: id,
-        artist: cleanArtist(artist),
+        artist: tidyArtist(artist),
         title: bi.title ?? "Untitled",
         year: bi.year ?? 0,
         label,
@@ -414,15 +399,17 @@ async function pruneRemovedReleaseCaches(previous: DiscogsRelease[], next: Disco
   return removedIds;
 }
 
-// Discogs sometimes appends "(2)" / "(3)" to artist names for disambiguation
-// across artists who share a name (e.g. "Joji (2)"). For display we strip it.
+// strip discogs' "(2)" disambiguation suffix
 function cleanArtist(name: string): string {
   return name.replace(/\s+\(\d+\)$/g, "").trim();
 }
 
-// Sort key: lowercase + strip leading article ("The ", "A ", "An ") so
-// "The Beatles" files under "Beatles", and "A Tribe Called Quest" files
-// under "Tribe". Mirrors physical record store convention.
+// credits like "Kingo Hamada (2), Kingo Hamada" collapse to one name once cleaned
+function tidyArtist(joined: string): string {
+  const names = [...new Set(joined.split(", ").map(cleanArtist).filter(Boolean))];
+  return names.join(", ") || "Various";
+}
+
 function sortKey(s: string): string {
   return s.toLowerCase().replace(/^(the|a|an)\s+/, "").trim();
 }

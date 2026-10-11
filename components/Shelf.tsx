@@ -3,8 +3,7 @@
 import { useMemo } from "react";
 import { makeWoodTexture } from "@/lib/woodTexture";
 
-// kallax-ish grid: up to 5 columns, then stacks into more rows. adjacent
-// cells share a divider so walls are never double thickness.
+// kallax-ish grid; neighbouring cells share a divider
 
 const CELL_W = 0.33;
 // taller than wide, so the led strip under the top board clears the records
@@ -69,8 +68,7 @@ export default function Shelf({ cols = 1, rows = 1 }: Props) {
   const startY = SHELF_BOTTOM_Y;
   const centerY = startY + totalHeight / 2;
 
-  // otherwise clicks on the top board raycast through to the records inside
-  // and yank them out. hover still bubbles so spine tooltips work.
+  // otherwise clicks on the boards raycast through and yank records out
   const swallow = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
   return (

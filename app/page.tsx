@@ -44,7 +44,7 @@ async function loadRecords(): Promise<{ records: DemoRecord[]; source: "discogs"
     }));
     return { records, source: "discogs" };
   } catch {
-    // discogs unreachable / rate-limited — let Scene's default demo set show.
+    // discogs unreachable / rate-limited, let Scene's default demo set show.
     return { records: [], source: "demo" };
   }
 }
@@ -56,11 +56,7 @@ export default async function Home() {
     left: "forks.png",
     right: "coco.jpg",
   };
-  // Dev-only: setting MULTIPLY_RECORDS=N tiles the loaded collection N times
-  // so we can preview what a much larger shelf would look like (e.g. test
-  // the multi-row "build around the turntable" layout without needing an
-  // actual 250-record discogs account). Each tile gets a fresh id-suffix so
-  // React keys stay unique.
+  // dev only: tile the collection to preview a much bigger shelf
   const multiply = parseInt(process.env.MULTIPLY_RECORDS ?? "1", 10);
   const recordsOut = multiply > 1
     ? Array.from({ length: multiply }, (_, k) =>

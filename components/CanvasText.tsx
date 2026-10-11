@@ -3,8 +3,7 @@
 import { useEffect, useMemo } from "react";
 import { makeTextTexture } from "@/lib/textTexture";
 
-// drop-in replacement for the subset of drei's <Text> this app used, without
-// the troika SDF pipeline. see lib/textTexture.ts for why.
+// drei <Text> without troika, see lib/textTexture
 
 const NEVER_RAYCAST = () => null;
 

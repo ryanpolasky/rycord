@@ -2,8 +2,7 @@
 
 import * as THREE from "three";
 
-// Procedural wood textures shared across the room. Generated once, cached
-// per (base, dark, planks, repeat) key so we don't burn canvas time per mesh.
+// cached per option set so meshes share canvases
 
 const cache = new Map<string, THREE.CanvasTexture>();
 

@@ -1,10 +1,6 @@
 import { ImageResponse } from "next/og";
 import { SITE } from "@/lib/site";
 
-// Shared 1200x630 social share card used by both /opengraph-image and
-// /twitter-image. Kept server-only and renderable by next/og (satori), so it
-// only uses flexbox + inline styles + raw divs, no custom fonts, no grid.
-
 export const SHARE_CARD_SIZE = { width: 1200, height: 630 } as const;
 export const SHARE_CARD_ALT = `${SITE.name} - ${SITE.tagline}`;
 export const SHARE_CARD_CONTENT_TYPE = "image/png";
@@ -37,8 +33,6 @@ export function renderShareCard() {
           }}
         />
 
-        {/* Vinyl disc peeking in from the right edge. Pushed mostly off-canvas
-            so the bottom-left text block reads clean with no overlap. */}
         <div
           style={{
             position: "absolute",
@@ -60,12 +54,7 @@ export function renderShareCard() {
               width: 440,
               height: 440,
               borderRadius: "50%",
-              // Satori (next/og) does not support conic-gradient, and it
-              // refuses bare color strings inside a comma-separated
-              // `background:` shorthand, so the pinwheel label is faked with
-              // four pastel radial blobs at the cardinal corners (set via
-              // backgroundImage) over a warm tan backgroundColor base. Same
-              // palette as the favicon (#d2734a / #b88752 / #92a48a / #c08c83).
+              // satori has no conic-gradient, so the label is four radial blobs
               backgroundColor: "#b88752",
               backgroundImage: [
                 "radial-gradient(circle at 22% 28%, rgba(210,115,74,0.95) 0%, rgba(210,115,74,0) 58%)",

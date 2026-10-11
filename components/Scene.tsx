@@ -1,9 +1,9 @@
 "use client";
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useProgress } from "@react-three/drei";
-import { EffectComposer, Bloom, Vignette } from "@react-three/postprocessing";
-import { KernelSize } from "postprocessing";
+import { PerformanceMonitor, useProgress } from "@react-three/drei";
+import { EffectComposer, Bloom, Noise, Vignette } from "@react-three/postprocessing";
+import { BlendFunction, KernelSize } from "postprocessing";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import Shelf, {
@@ -36,9 +36,7 @@ import { tierDpr, usePerformanceTier, type PerformanceMode, type PerformanceTier
 
 const MAX_COLS = 5;
 
-// Perspective camera FOV bounds. BASE_FOV must match the value passed to
-// <Canvas camera={...}> below; ZOOM_MIN_FOV is the tightest zoom-in the
-// user can reach while inspecting an active jacket (scroll up to zoom).
+// BASE_FOV must match the <Canvas camera> fov
 const BASE_FOV = 36;
 const ZOOM_MIN_FOV = 18;
 type WallArtFocus = "left" | "right" | null;
@@ -47,12 +45,7 @@ const ADMIN_COG_DOUBLE_TAP_MS = 180;
 type LibraryMode = "collection" | "wantlist";
 type WantlistStatus = "idle" | "loading" | "ready" | "error";
 
-// Which cell, if any, holds the turntable when the shelf is multi-row?
-// On a multi-row unit the turntable lives INSIDE one cell — dead center
-// of row 1 (immediately above the bottom row). The two cells flanking it
-// stay empty too, giving the player visual breathing room ("shelf · blank
-// · player · blank · shelf"). For single-row units the turntable sits on
-// TOP of the cabinet, so no cells are reserved.
+// multi-row shelves build around the turntable in row 1, with a blank cell either side
 function playerSlot(cols: number, rows: number): { col: number; row: number } | null {
   if (rows < 2) return null;
   return { col: Math.floor((cols - 1) / 2), row: 1 };
@@ -74,11 +67,11 @@ function recordIndexFromId(recordId: string | null, total: number): number | nul
 }
 
 type Props = {
-  /** Records to lay out on the shelf. Defaults to the synthetic demo set. */
+  // Records to lay out on the shelf. Defaults to the synthetic demo set.
   records?: DemoRecord[];
-  /** Discogs username, shown in the header. Falls back to "demo" if absent. */
+  // Discogs username, shown in the header. Falls back to "demo" if absent.
   username?: string;
-  /** Source label for the header ("discogs" or "demo"). */
+  // Source label for the header ("discogs" or "demo").
   source?: "discogs" | "demo";
   wallArtUrls?: {
     left?: string;
@@ -110,18 +103,14 @@ export default function Scene({
   const [libraryMode, setLibraryMode] = useState<LibraryMode>("collection");
   const pendingActiveIdRef = useRef<string | null>(null);
   const ledState = useLedState();
-  // Polled Ryan-is-currently-listening state from /api/nowplaying. Drives
-  // the turntable platter spin + its hover tooltip.
   const nowPlaying = useNowPlaying();
-  // When true, the camera smoothly dollies in to a ¾-down closeup of the
-  // turntable (same critically-damped chase the active-record view uses).
-  // Clicking the turntable toggles this; clicking empty space or activating
-  // a record clears it.
   const [turntableFocused, setTurntableFocused] = useState(false);
   const [focusedArt, setFocusedArt] = useState<WallArtFocus>(null);
   const hoverTransitionKeyRef = useRef<string | null>(null);
   const { tier, mode, setMode } = usePerformanceTier();
-  const dpr = tierDpr(tier);
+  const [dprMin, dprMax] = tierDpr(tier);
+  const [dprFactor, setDprFactor] = useState(1);
+  const dpr: [number, number] = mode === "auto" ? [dprMin, dprMin + (dprMax - dprMin) * dprFactor] : [dprMin, dprMax];
   const activeRecords = libraryMode === "wantlist" ? (wantlistStatus === "ready" ? wantlistRecords : []) : records;
 
   const clearTurntableFocus = () => setTurntableFocused(false);
@@ -145,12 +134,7 @@ export default function Scene({
   };
 
   const requestActiveRecord = (nextId: string) => {
-    // Activating a record is mutually exclusive with turntable focus —
-    // the record view wants the camera centered on the jacket, not on
-    // the player — so any pending focus collapses the instant a record
-    // is selected. Same for the picked-up paper / open remote: anything
-    // that takes the foreground gets put down so the InfoPanel has the
-    // viewport to itself.
+    // anything else in the foreground gets put down so the InfoPanel has the view
     if (turntableFocused) setTurntableFocused(false);
     if (focusedArt) setFocusedArt(null);
     if (ledState.remoteOpen) setRemoteOpen(false);
@@ -172,11 +156,6 @@ export default function Scene({
   };
 
   const toggleTurntableFocus = () => {
-    // If a record is currently pulled out, retract it first so the
-    // camera's follow-through doesn't fight the InfoPanel slide-out.
-    // Any picked-up UI (remote, paper) also gets put down — the camera
-    // is about to dolly in on the player and the foreground prop would
-    // either fly out of frame or block the view.
     if (activeId) clearActiveRecord();
     if (focusedArt) setFocusedArt(null);
     if (ledState.remoteOpen) setRemoteOpen(false);
@@ -185,9 +164,6 @@ export default function Scene({
   };
 
   const toggleWallArtFocus = (which: "left" | "right") => {
-    // Same reasoning as toggleTurntableFocus: anything held in the
-    // foreground gets dismissed so the wall-art closeup has the
-    // viewport to itself.
     if (activeId) clearActiveRecord();
     if (turntableFocused) setTurntableFocused(false);
     if (ledState.remoteOpen) setRemoteOpen(false);
@@ -222,14 +198,7 @@ export default function Scene({
     muteHoverFor(950);
   }, [activeId, turntableFocused, focusedArt]);
 
-  // Arrow-key traversal between records while one is being inspected.
-  // ArrowLeft / ArrowRight step the active record one slot back/forward in
-  // the shelf order. We read from `activeId ?? pendingActiveIdRef.current`
-  // so that rapid arrow presses during the brief retract handoff (when
-  // activeId is momentarily null) still register and update the pending
-  // target — matching the way pointer clicks behave through the same
-  // handoff path. Modifier-combos and form-field focus are skipped so we
-  // never fight with Cmd+Left (browser back), text editing, etc.
+  // arrow keys step through records, reading the pending id so presses mid-handoff still land
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const sourceId = activeId ?? pendingActiveIdRef.current;
@@ -262,25 +231,15 @@ export default function Scene({
     return () => window.removeEventListener("keydown", onKey);
   }, [activeId, activeRecords]);
 
-  // pack records along the X axis, INSIDE fixed-size Kallax cells. Records
-  // are LEFT-aligned: the first record's left edge sits ~1mm off the inner
-  // left wall, with each subsequent spine packed right next to the previous.
-  // Once a cell fills, we move into the next cell (rightward), then once we
-  // hit MAX_COLS wide we stack a new row above.
   const spineThickness = 0.006;
   const gap = 0.0006;
   const stride = spineThickness + gap;
-  // Use the full cell interior width — only 2mm of total breathing room
-  // (1mm at each end) so records fill the cell wall-to-wall.
   const RECORDS_PER_CELL = Math.floor((SHELF_INNER_W - 0.002) / stride);
 
   const total = activeRecords.length;
   const recordCellsNeeded = Math.max(1, Math.ceil(total / RECORDS_PER_CELL));
 
-  // Provisional layout (no player slot yet). If this fits in one row,
-  // we're done — single-row units put the turntable ON TOP, no reserved
-  // cells. Otherwise we add 3 extra cells (player slot + 2 flank) and
-  // recompute.
+  // single-row shelves put the turntable on top; taller ones reserve 3 cells for it
   let cols = Math.min(MAX_COLS, recordCellsNeeded);
   let rows = Math.ceil(recordCellsNeeded / cols);
   if (rows >= 2) {
@@ -290,14 +249,7 @@ export default function Scene({
   }
   const slot = playerSlot(cols, rows);
 
-  // The bottom row fills left → right (how a real Kallax gets filled).
-  // Every row ABOVE the bottom fills *outside-in symmetrically*:
-  // outermost pair of cells alternates spine-by-spine, then the next pair
-  // inward, etc. The middle cell (for odd cols) fills last. This keeps
-  // every partial row visually balanced around the center — no lone shelf
-  // hanging off to one side. Left-half cells pack against the left wall;
-  // right-half cells pack against the right wall, so the spines actually
-  // mirror.
+  // bottom row fills left to right; rows above fill outside-in so partial rows stay balanced
   function buildRowCells(row: number): { col: number; align: "left" | "right" }[] {
     // Available cells in this row (skipping player-slot reservations).
     const available: number[] = [];
@@ -308,9 +260,6 @@ export default function Scene({
       // bottom: plain left-to-right
       return available.map((c) => ({ col: c, align: "left" as const }));
     }
-    // outside-in pair-aware ordering. Interleave the outermost pair first,
-    // so within a pair, records alternate spine-by-spine between the left
-    // and right cell (rather than filling one cell before the other).
     const left = available.filter((c) => c < cols / 2);     // left half
     const right = available.filter((c) => c > (cols - 1) / 2).reverse(); // right half, outermost first
     const mid = available.filter((c) => c === (cols - 1) / 2); // only for odd cols
@@ -324,14 +273,7 @@ export default function Scene({
     return out;
   }
 
-  // Expand the row's cell ordering into a record-by-record sequence.
-  // - Bottom row: fill each cell COMPLETELY before moving to the next,
-  //   so the leftmost cells pack edge-to-edge with no internal gap. Only
-  //   the very last (partial) cell has slack on its right side.
-  // - Non-bottom rows: interleave — one record per cell per "round" — so
-  //   each pair of cells fills at the same rate. Combined with
-  //   buildRowCells's outside-in pair ordering, this keeps every partial
-  //   row visually balanced around the center.
+  // upper rows interleave one record per cell so paired cells fill at the same rate
   function buildRowSequence(row: number): { col: number; align: "left" | "right"; inCellIdx: number }[] {
     const cells = buildRowCells(row);
     const seq: { col: number; align: "left" | "right"; inCellIdx: number }[] = [];
@@ -365,10 +307,6 @@ export default function Scene({
     return { col: cols - 1, row: rows - 1, inCellIdx: 0, align: "left" };
   }
 
-  // Count how many records actually land in each cell. We need this so a
-  // partial cell stretches its spines edge-to-edge (no awkward right-side
-  // gap) instead of packing them at the standard 6.6 mm stride and leaving
-  // the remainder visibly empty. Computed once per render.
   const cellCounts = (() => {
     const counts = new Map<string, number>();
     for (let i = 0; i < activeRecords.length; i++) {
@@ -379,10 +317,7 @@ export default function Scene({
     return counts;
   })();
 
-  // For a cell with `count` records, how far apart do consecutive spines sit?
-  // If the cell is FULL (count >= RECORDS_PER_CELL) we use the standard
-  // 6.6 mm stride. Otherwise we stretch so the first spine's left edge sits
-  // on the left wall and the last spine's right edge sits on the right wall.
+  // partial cells stretch their spines wall to wall instead of leaving a gap
   function cellStride(count: number): number {
     if (count >= RECORDS_PER_CELL) return stride;
     if (count <= 1) return stride;
@@ -395,8 +330,6 @@ export default function Scene({
     const count = cellCounts.get(`${col},${row}`) ?? 1;
     const s = cellStride(count);
     if (align === "right") {
-      // Right-align: pack against the right wall, growing leftward. The
-      // rightmost spine sits 1 mm off the right interior wall.
       const cellRightEdge = center.x + SHELF_INNER_W / 2 - 0.001;
       const x = cellRightEdge - inCellIdx * s - spineThickness / 2;
       return { x, y: center.y };
@@ -407,18 +340,12 @@ export default function Scene({
     return { x, y: center.y };
   }
 
-  // Half-width of the shelf in world units — used to position props clear of it
+  // Half-width of the shelf in world units, used to position props clear of it
   const shelfHalfWidth = (cols * SHELF_CELL) / 2;
   const shelfTopY = SHELF_BOTTOM_Y + rows * SHELF_CELL_H;
-  // LED strip sits just below the top board interior surface, at the very top
-  // of the unit. Same offset that worked for v0.0.6, now derived from the
-  // dynamic shelf top instead of hardcoded.
   const ledStripY = shelfTopY - SHELF_WALL - 0.004;
 
-  // World-space position of the turntable's plinth base. Shared by the
-  // <Turntable> render and the IdleCamera focus-target so they can't
-  // disagree about where the player sits (which would make the camera
-  // miss its anchor).
+  // shared with IdleCamera so the closeup can't miss its anchor
   const turntablePos: [number, number, number] = slot
     ? (() => {
         const cellCenter = shelfCellCenter(slot.col, slot.row, cols, rows);
@@ -428,8 +355,6 @@ export default function Scene({
       })()
     : [0, shelfTopY, -0.16];
 
-  // activeId is in the form `<release_id>-<index>` (see VinylRecord key below).
-  // Look up the underlying record by parsing back the trailing index.
   const active = (() => {
     const idx = recordIndexFromId(activeId, activeRecords.length);
     if (idx === null) return null;
@@ -440,42 +365,36 @@ export default function Scene({
     <div
       className="fixed inset-0"
       onPointerMove={(e) => {
-        // tooltip position follows the cursor; pixel-space, with the tooltip
-        // offset to the lower-right of the cursor in HoverTooltip.
         setHoverPos(e.clientX, e.clientY);
       }}
       onPointerLeave={clearHover}
     >
       <Canvas
         shadows={tier !== "low"}
-        // DPR capped at 1.5: 2× on retina renders 4× the pixels of 1×,
-        // which doubles shadow map + bloom fragment work for an effect
-        // very few users can actually distinguish. 1.5× is the sweet spot —
-        // visually indistinguishable from 2× at normal viewing distance,
-        // ~30% less pixel work on retina laptops.
         dpr={dpr}
         camera={{ position: [0.05, 0.52, 1.05], fov: BASE_FOV, near: 0.01, far: 50 }}
-        gl={{ antialias: tier === "high", toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: tier === "low" ? 0.82 : 0.6 }}
+        gl={{ antialias: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: tier === "low" ? 0.82 : 0.6 }}
         onPointerMissed={() => {
           clearHover();
           clearActiveRecord();
           clearTurntableFocus();
           clearWallArtFocus();
-          // dismiss any picked-up UI when the user clicks empty space —
-          // both the remote and the paper scrap behave the same way.
           if (ledState.remoteOpen) setRemoteOpen(false);
           if (ledState.paperOpen) setPaperOpen(false);
         }}
       >
-        {/* dusky warm cream — dimmer than midday, like dusk indoor light */}
+        {/* dusky warm cream, dimmer than midday, like dusk indoor light */}
         <color attach="background" args={[tier === "low" ? "#4a3a2a" : "#3a2e22"]} />
         {/* warm fog softens the back wall and adds depth */}
         <fog attach="fog" args={[tier === "low" ? "#3a2b1e" : "#2a1f15", 0.8, tier === "low" ? 3.8 : 3.2]} />
 
+        {mode === "auto" && (
+          <PerformanceMonitor factor={1} flipflops={3} onChange={({ factor }) => setDprFactor(Math.round(factor * 10) / 10)} />
+        )}
         <Lights tier={tier} />
         <SceneReadySignal onReady={onReady} />
 
-        {/* No HDRI environment — kills the bright IBL that was washing out the wall */}
+        {/* No HDRI environment, kills the bright IBL that was washing out the wall */}
 
         <Room />
         <RoomProps
@@ -488,14 +407,6 @@ export default function Scene({
         {tier !== "low" && <RainShadow />}
         <Shelf cols={cols} rows={rows} />
 
-        {/* Turntable — on TOP of the shelf for single-row units (where it
-            sits as a centerpiece), inside the reserved cell for multi-row
-            units (where the shelf has been built around the player slot).
-            The turntable's click handler toggles a camera focus mode
-            (handled in IdleCamera) so hitting the player brings the
-            camera up to a ¾-down closeup. `turntablePos` is computed
-            once and shared with IdleCamera below so the camera aims at
-            the exact same anchor. */}
         <Turntable
           position={turntablePos}
           accent={ACCENT_COLOR}
@@ -504,13 +415,7 @@ export default function Scene({
           onClick={toggleTurntableFocus}
         />
 
-
-        {/* Addressable RGB LED strip — tucked into the inside-top cove of the
-            TOP row of the shelf. Only one strip across the entire unit (the
-            rest of the cells don't get cove lighting). Recessed behind the
-            front lip so the camera can't see the LEDs directly — you only
-            see the COLORED GLOW washing the front of the records, back wall,
-            and forward onto the rug. */}
+        {/* recessed behind the front lip so you see the glow, not the leds */}
         <RGBStrip
           position={[0, ledStripY, -0.012]}
           size={[cols * SHELF_CELL - SHELF_WALL * 2 - 0.002, 0.0035, 0.008]}
@@ -520,32 +425,17 @@ export default function Scene({
           lightMultiplier={tier === "medium" ? 0.75 : 1.3}
           tier={tier}
         />
-        {/* matte-black cove ceiling — blocks any stray bounce/bloom from
-            spilling UP through the shelf top */}
+        {/* stops bloom bleeding up through the shelf top */}
         <mesh position={[0, ledStripY + 0.007, -0.012]}>
           <boxGeometry args={[cols * SHELF_CELL - SHELF_WALL * 2 + 0.004, 0.003, 0.04]} />
           <meshStandardMaterial color="#08060a" roughness={1.0} />
         </mesh>
 
-        {/* RGB remote — rests flat on the rug just in front of the shelf, off
-            to the right. Long axis runs LEFT–RIGHT (parallel to the shelf
-            front, like a real chinesium IR remote would be set down), with
-            only a tiny back-edge lift so the camera can still pick up the
-            buttons. Click anywhere on it to summon it; click empty space
-            outside to dismiss. */}
         <Remote
           position={[shelfHalfWidth + 0.10, -0.176, 0.20]}
           rotation={[-0.05, Math.PI / 2, 0]}
         />
 
-        {/* Paper scrap — a small note from me to the visitor, tucked on the
-            floor just in front of the book stack on the LEFT. Same pick-up
-            interaction as the remote: click it to summon, click empty space
-            to put it back. The two are mutually exclusive (handled in
-            ledStore) so picking one up dismisses the other.
-            Position: x just to the right of the stack (so the scrap reads
-            as fallen out of one of the books, not stacked under them),
-            y on the rug, z a touch in front of the stack toward camera. */}
         <Paper
           position={[-(shelfHalfWidth + 0.05), -0.176, 0.48]}
           rotation={[0, -0.32, 0]}
@@ -554,9 +444,7 @@ export default function Scene({
         {activeRecords.map((rec, i) => {
           const p = placeRecord(i);
           const recordId = `${rec.id}-${i}`;
-          // Index-suffix the key so duplicates in the source collection
-          // (Discogs sometimes returns the same release_id twice) don't
-          // trigger React's "duplicate key" reconciliation bug.
+          // discogs can return the same release twice, so keys get the index
           return (
             <VinylRecord
               key={recordId}
@@ -590,10 +478,7 @@ export default function Scene({
         />
 
         {tier === "high" ? (
-          <EffectComposer multisampling={0}>
-            {/* bloom — picks up the emissive LED strips so they actually glow.
-                Lowered threshold so the high-emissive strips bloom but the dim
-                wall plaster still does not. */}
+          <EffectComposer multisampling={4}>
             <Bloom
               intensity={0.7}
               luminanceThreshold={0.55}
@@ -602,6 +487,7 @@ export default function Scene({
             />
             {/* deeper vignette = the corners fall into dim cozy shadow */}
             <Vignette eskil={false} offset={0.28} darkness={0.85} />
+            <Noise premultiply blendFunction={BlendFunction.SCREEN} opacity={0.35} />
           </EffectComposer>
         ) : tier === "medium" ? (
           <EffectComposer multisampling={0}>
@@ -626,7 +512,7 @@ export default function Scene({
         onModeChange={changeLibraryMode}
       />
       <Footer />
-      <QualityGear mode={mode} tier={tier} username={username} source={source} onModeChange={setMode} />
+      <QualityGear mode={mode} tier={tier} username={username} source={source} hidden={active !== null} onModeChange={setMode} />
     </div>
   );
 }
@@ -655,15 +541,7 @@ function SceneReadySignal({ onReady }: { onReady?: () => void }) {
   return null;
 }
 
-// Subtle camera idle drift + active-state offset so the info panel doesn't
-// cover the pulled-out record. When a record is active we slide the camera
-// LEFT and pan the lookAt LEFT so the shelf shifts into the un-paneled area.
-// Also dollies BACK + UP as the shelf grows (more cells = need wider FOV).
-//
-// Plus the user-driven "look around" controls:
-//   - mouse position drives a subtle parallax (±~4cm) so the room feels alive
-//   - scroll wheel dollies the camera closer/further (clamped)
-// Both are critically damped so they never feel twitchy.
+// idle drift, mouse parallax, scroll dolly, and the focus closeups, all critically damped
 function IdleCamera({
   active,
   cols,
@@ -676,13 +554,7 @@ function IdleCamera({
   active: string | null;
   cols: number;
   rows: number;
-  /** True while the user has clicked the turntable and the camera should
-   *  be dollied in on it. Blends independently of the record view so we
-   *  can transition smoothly between the two. */
   turntableFocused: boolean;
-  /** World-space plinth base of the turntable, same one the <Turntable>
-   *  component is rendered at. Used as the anchor the closeup camera
-   *  aims at. */
   turntablePos: [number, number, number];
   focusedArt: WallArtFocus;
   shelfHalfWidth: number;
@@ -690,18 +562,11 @@ function IdleCamera({
   const { camera } = useThree();
   // scrollDolly: user-driven dolly offset (added on top of size-derived dolly)
   const scrollDolly = useRef(0);
-  // Stashed scroll-dolly value at the moment a record was activated, so we
-  // can SMOOTHLY restore the user's prior viewing pose when they dismiss.
-  // null = nothing stashed yet.
+  // restored when the record is dismissed
   const stashedScrollDolly = useRef<number | null>(null);
-  // zoomT: user-driven zoom-into-active-jacket value, 0..1. Only meaningful
-  // while a record is active; scroll up = zoom in, scroll down = zoom out.
-  // Resets to 0 on every activation change so each new record opens at the
-  // default head-on FOV instead of inheriting the previous zoom level.
+  // 0..1 zoom into the active jacket, reset on every activation
   const zoomT = useRef(0);
-  // Mirror of `active` so the wheel-handler effect doesn't have to be
-  // re-attached on every active change (which would briefly drop scroll
-  // events during the active transition).
+  // mirrored so the wheel listener doesn't re-attach and drop events mid-transition
   const activeRef = useRef<string | null>(null);
   const lastFocusedArtRef = useRef<Exclude<WallArtFocus, null> | null>(null);
   const offset = useRef({
@@ -718,12 +583,7 @@ function IdleCamera({
     artBlend: 0, vArtBlend: 0,
   });
 
-  // Persistent scratch vectors so useFrame doesn't allocate per-frame. The
-  // camera-rig logic blends up to four poses (front, side, turntable, art)
-  // and previously did `new THREE.Vector3(...)` + `.clone().lerp(...)` for
-  // each, racking up 6–14 allocs/frame → ~360–840 allocs/sec at 60fps. The
-  // GC pressure showed up as periodic micro-stutters during camera drift.
-  // Now we `.set()` into these once-allocated vectors and `.lerp()` in place.
+  // scratch vectors so the camera rig allocates nothing per frame
   const scratch = useRef({
     frontPos: new THREE.Vector3(),
     frontLook: new THREE.Vector3(),
@@ -737,26 +597,17 @@ function IdleCamera({
     finalLook: new THREE.Vector3(),
   });
 
-  // Side-view forces the user into a foreshortened pose that's great for
-  // peeking down rows of spines but awful for actually reading a pulled-out
-  // album. So: any time a record IS active, we force scrollDolly to 0
-  // (head-on view). On the FIRST activation we stash whatever scroll the
-  // user was at; on dismiss we restore it. Record-to-record switches keep
-  // the stash (and re-force scroll to 0 in case anything else moved it).
+  // activation forces the head-on view and restores your scroll on dismiss
   useEffect(() => {
     if (active) {
       if (!activeRef.current) {
-        // first activation in this session — stash the user's prior pose
+        // first activation in this session, stash the user's prior pose
         stashedScrollDolly.current = scrollDolly.current;
       }
-      // force scroll to 0 on every active change, including record-to-record
-      // switches; the critically-damped chase in useFrame handles the easing.
       scrollDolly.current = 0;
-      // every new activation also opens at full head-on view — the smoothed
-      // FOV chase will ease back to BASE_FOV automatically.
       zoomT.current = 0;
     } else if (activeRef.current) {
-      // dismissing — restore the user to their prior view
+      // dismissing, restore the user to their prior view
       if (stashedScrollDolly.current !== null) {
         scrollDolly.current = stashedScrollDolly.current;
         stashedScrollDolly.current = null;
@@ -768,11 +619,7 @@ function IdleCamera({
 
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
-      // If the wheel event originated inside a region that opted into native
-      // scroll (currently the InfoPanel sidebar), let the browser scroll it
-      // and don't hijack for zoom or dolly. Without this the global handler
-      // calls preventDefault on every wheel tick and the sidebar's
-      // overflow-y-auto never gets a chance to fire.
+      // let opted-in regions like the InfoPanel scroll natively
       const target = e.target;
       if (
         target instanceof Element &&
@@ -783,10 +630,6 @@ function IdleCamera({
 
       muteHoverFor(450);
 
-      // While a record is active, hijack the wheel for zoom-into-jacket:
-      // scroll UP (negative deltaY) zooms in, scroll DOWN zooms out. zoomT
-      // is clamped to [0, 1] and drives a perspective-FOV interpolation in
-      // the frame loop (BASE_FOV → ZOOM_MIN_FOV).
       if (activeRef.current) {
         e.preventDefault();
         const step = -e.deltaY * 0.0018;
@@ -794,10 +637,7 @@ function IdleCamera({
         return;
       }
 
-      // Lean in/out (positive deltaY = scroll DOWN = lean BACK from shelf).
-      // Scroll UP → scrollDolly goes NEGATIVE → camera closer to shelf.
-      // Range extended to [-1.5, 0.6]: past ~-0.35 the camera additionally
-      // swings around to the SIDE VIEW (see sideBlend in the frame loop).
+      // past -0.35 the camera swings round to the side view
       e.preventDefault();
       const step = e.deltaY * 0.0008;
       scrollDolly.current = Math.max(-1.5, Math.min(0.6, scrollDolly.current + step));
@@ -806,10 +646,7 @@ function IdleCamera({
     return () => window.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Target dolly: derived from the shelf grid size so the whole unit stays
-  // in frame, with a minimum 3-column camera baseline for tiny collections.
-  // Each extra col adds a bit of horizontal field; each extra row pushes
-  // camera back + up to keep the top of the shelf in view.
+  // pull back as the shelf grows, never framing tighter than 3 columns
   const cameraCols = Math.max(cols, 3);
   const dolly = useMemo(() => {
     const baseX = 0.05;
@@ -820,8 +657,6 @@ function IdleCamera({
     return { x: baseX, y: dollyY, z: dollyZ };
   }, [cameraCols, rows]);
 
-  // Lookat height creeps up so the camera stays pointed at the middle of the
-  // grid instead of the bottom row.
   const lookYBase = useMemo(() => -0.02 + Math.max(0, rows - 1) * 0.16, [rows]);
 
   useFrame((state, rawDt) => {
@@ -829,12 +664,7 @@ function IdleCamera({
     const dt = Math.min(rawDt, 0.05);
     if (focusedArt) lastFocusedArtRef.current = focusedArt;
 
-    // Centering model: we deliberately do NOT pan the camera when a record
-    // is active. Instead, the record's world-x is offset LEFT
-    // (FLOAT_TARGET.x = −0.10 in VinylRecord.tsx) so it projects onto the
-    // visual center of the LEFT ~60% of the viewport (the right ~40% is
-    // the info panel). Panning the camera + offsetting the record was
-    // double-counting and made the centering finicky.
+    // the camera doesn't pan for an active record; FLOAT_TARGET.x offsets the record instead
     const targetX = 0;
     const targetLookX = 0;
     const targetY = active ? 0 : 0;
@@ -851,21 +681,11 @@ function IdleCamera({
     const sY = step(o.y, o.vY, targetY); o.y = sY.p; o.vY = sY.v;
     const sLY = step(o.lookY, o.vLookY, targetLookY); o.lookY = sLY.p; o.vLookY = sLY.v;
 
-    // Z dolly — smoothly chases the computed dolly distance.
+    // Z dolly, smoothly chases the computed dolly distance.
     const targetZ = dolly.z;
     const sZ = step(o.z, o.vZ, targetZ - 1.05); o.z = sZ.p; o.vZ = sZ.v;
 
-    // Mouse parallax: r3f exposes pointer in NDC space (-1 to +1). We map
-    // it to a small world offset. Slower omega so the gaze drift feels
-    // natural and not snappy. Magnitude is intentionally tiny — this is
-    // about the room "breathing with you", not free orbiting.
-    //
-    // While a record is being inspected we PIN the parallax to 0 so any
-    // pointer drift across the scene or over the InfoPanel doesn't sway
-    // the camera and knock the head-on jacket view out of alignment. The
-    // existing critically-damped chase eases the camera smoothly back to
-    // its center pose on activation and back into pointer-follow on
-    // dismissal — no snap.
+    // parallax is pinned to 0 while inspecting so pointer drift can't knock the view off
     const pX = state.pointer.x;       // -1 (left) … +1 (right)
     const pY = state.pointer.y;       // -1 (bottom) … +1 (top)
     const focusLocked = Boolean(active || focusedArt);
@@ -874,9 +694,6 @@ function IdleCamera({
     const sParX = step(o.parX, o.vParX, parTargetX, 2.6); o.parX = sParX.p; o.vParX = sParX.v;
     const sParY = step(o.parY, o.vParY, parTargetY, 2.6); o.parY = sParY.p; o.vParY = sParY.v;
 
-    // Turntable-focus blend: eases 0 → 1 when the user clicks the player,
-    // 1 → 0 when they dismiss. Slightly snappier than the main omega so
-    // the "dolly up to the player" feels deliberate rather than drifty.
     const sTt = step(o.ttBlend, o.vTtBlend, turntableFocused ? 1 : 0, 5.6);
     o.ttBlend = sTt.p; o.vTtBlend = sTt.v;
 
@@ -887,15 +704,8 @@ function IdleCamera({
     const sDoll = step(o.dollyZ, o.vDollyZ, scrollDolly.current, 3.2);
     o.dollyZ = sDoll.p; o.vDollyZ = sDoll.v;
 
-    // Side-view blend: 0 = front view, 1 = looking down the shelf from
-    // the right end. Activates as the user scrolls past the "lean in"
-    // range (scrollDolly < -0.35). Critically damped via o.dollyZ smoothing
-    // already (since sideBlend reads from o.dollyZ, not raw scrollDolly).
     const sideBlend = Math.max(0, Math.min(1, (-0.35 - o.dollyZ) / 0.65));
 
-    // Front pose (sideBlend = 0): camera near the front of the shelf,
-    // looking at its center. All pose vectors are pre-allocated scratch
-    // (see `scratch` ref above); we `.set()` them in place every frame.
     const sc = scratch.current;
     const sway = active ? 0.008 : 0.022;
     sc.frontPos.set(
@@ -909,18 +719,7 @@ function IdleCamera({
       0,
     );
 
-    // Side pose (sideBlend = 1): a 3/4 view from off the right end of the
-    // shelf — camera is BOTH offset to the right AND pulled forward from
-    // the shelf face, so the resulting look angle is ~55° from the front
-    // (not 90° / straight-side, which was too steep for traversing the
-    // collection). Reads as "leaning in from the right" rather than
-    // "fully side-on."
-    //
-    // Tradeoff: with the previous 90° side angle, you could see the front
-    // covers of records that tipped out on hover but the records along
-    // the shelf foreshortened HARD. At 55° they don't foreshorten as
-    // much, you can scan across them comfortably, AND the front-cover
-    // peek on hover still reads clearly.
+    // ~55 degrees off the front; 90 foreshortened the spines too hard
     const shelfRightEdge = cameraCols * 0.5 * 0.33 + 0.28;     // SHELF_CELL ≈ 0.33m
     sc.sidePos.set(
       shelfRightEdge + o.parX * 0.5,
@@ -933,16 +732,10 @@ function IdleCamera({
       0.05,
     );
 
-    // Compose the shelf-pose blend directly into finalPos/finalLook — the
-    // turntable and art blends will then layer on top in place.
     sc.finalPos.copy(sc.frontPos).lerp(sc.sidePos, sideBlend);
     sc.finalLook.copy(sc.frontLook).lerp(sc.sideLook, sideBlend);
 
-    // Turntable closeup pose: hovering ~22cm above the platter and ~35cm
-    // in front of it, angled down at ~32° so you see the platter top,
-    // the record label art, AND the tonearm sweeping inward all in one
-    // frame. Parallax is retained at a reduced amplitude so the view
-    // still breathes without knocking the closeup out of alignment.
+    // high enough to see the label and the tonearm in one frame
     const ttBlend = o.ttBlend;
     if (ttBlend > 0.0005) {
       const ttSway = 0.005;
@@ -969,11 +762,7 @@ function IdleCamera({
         : shelfHalfWidth + padding + 0.34;
       const artY = artTarget === "left" ? 0.215 : 0.275;
       const artZ = -0.49;
-      // Left frame is ~1.5× the size of the right one (see RoomProps.tsx
-      // small flag), so it needs a proportionally further camera offset to
-      // fill the same comfortable portion of the viewport. Without this the
-      // left painting gets cropped/zoomed in too tight while the right
-      // painting reads as intended.
+      // the left frame is ~1.5x bigger, so it needs more distance
       const artCameraZ = artTarget === "left" ? 0.75 : 0.46;
       sc.artClosePos.set(
         artX + (artTarget === "left" ? 0.02 : -0.02) + o.parX * 0.12,
@@ -992,12 +781,6 @@ function IdleCamera({
     camera.position.copy(sc.finalPos);
     camera.lookAt(sc.finalLook);
 
-    // FOV zoom — only active when a record is pulled out. Smoothly chases
-    // the user's zoomT (0..1) toward ZOOM_MIN_FOV; when no record is
-    // active the target snaps back to BASE_FOV, easing the camera
-    // "unzoom" automatically on dismiss. We only push the new FOV to the
-    // camera if it materially changed, to avoid recalculating the
-    // projection matrix every frame for a no-op.
     const targetFov = active
       ? BASE_FOV - zoomT.current * (BASE_FOV - ZOOM_MIN_FOV)
       : BASE_FOV;
@@ -1014,21 +797,13 @@ function IdleCamera({
   return null;
 }
 
-// Soft warm spotlight that fades in whenever a record is active, aimed at
-// the floating album. Darker covers (Yeezus, Korn, Joy Division etc.) were
-// reading as black silhouettes against the dim room — this gives the
-// album a dedicated key light without disturbing the rest of the scene.
-//
-// Constants match VinylRecord.FLOAT_TARGET; the spotlight sits 0.5m above
-// and slightly toward the camera from the float point, angled down at it.
+// key light for the floating jacket, dark covers were reading as silhouettes
 function ActiveSpotlight({ active }: { active: boolean }) {
   const spotRef = useRef<THREE.SpotLight>(null);
   const targetRef = useRef<THREE.Object3D>(null);
   const intensity = useRef(0);
 
   useEffect(() => {
-    // Wire the spotlight's `target` to our managed Object3D so it aims at
-    // a precise world point rather than the default (0,0,0) parent space.
     if (spotRef.current && targetRef.current) {
       spotRef.current.target = targetRef.current;
     }
@@ -1066,17 +841,12 @@ function ActiveSpotlight({ active }: { active: boolean }) {
   );
 }
 
-// Soft cozy overhead light that warms up the turntable while the camera
-// is dollied in on it. Sits ~50cm directly above the plinth, angled
-// straight down at the platter, and fades in/out to match
-// `turntableFocused`. Distinct from the room's ambient lights: this
-// is a focus spotlight that gives the closeup a "now playing" vibe.
 function TurntableSpotlight({
   focused,
   target,
 }: {
   focused: boolean;
-  /** Plinth-base world position, same anchor used by the camera. */
+  // Plinth-base world position, same anchor used by the camera.
   target: [number, number, number];
 }) {
   const spotRef = useRef<THREE.SpotLight>(null);
@@ -1092,9 +862,6 @@ function TurntableSpotlight({
   useFrame((_, rawDt) => {
     if (!spotRef.current) return;
     const dt = Math.min(rawDt, 0.05);
-    // Lower peak than the record spotlight so the platter gets a warm
-    // focus wash without blowing out the album-art label. Eases over
-    // ~400ms so the light blooms in gently rather than snapping on.
     const want = focused ? 1.25 : 0;
     intensity.current += (want - intensity.current) * Math.min(1, dt * 5);
     spotRef.current.intensity = intensity.current;
@@ -1106,9 +873,7 @@ function TurntableSpotlight({
     <>
       <spotLight
         ref={spotRef}
-        // 50cm above the plinth, nudged 8cm forward so the cone aims at
-        // the front of the platter (closer to the camera) instead of the
-        // far back edge, which would leave the tonearm in shadow.
+        // nudged forward or the tonearm ends up in shadow
         position={[tx, ty + 0.50, tz + 0.08]}
         angle={Math.PI / 5.5}
         penumbra={0.85}
@@ -1118,8 +883,6 @@ function TurntableSpotlight({
         intensity={0}
         castShadow={false}
       />
-      {/* Aim target sits a few cm above the plinth top so the cone's
-          center lands on the platter label rather than the plinth wood. */}
       <object3D ref={targetRef} position={[tx, ty + 0.06, tz]} />
     </>
   );
@@ -1180,12 +943,14 @@ function QualityGear({
   tier,
   username,
   source,
+  hidden = false,
   onModeChange,
 }: {
   mode: PerformanceMode;
   tier: PerformanceTier;
   username: string;
   source?: "discogs" | "demo";
+  hidden?: boolean;
   onModeChange: (mode: PerformanceMode) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1321,7 +1086,11 @@ function QualityGear({
   const activeButtonClass = "rounded-full border border-ink/70 bg-ink px-3 py-1.5 font-sans text-[9px] uppercase tracking-[0.2em] text-paper shadow-[0_8px_20px_rgba(45,37,28,0.16)] transition disabled:cursor-not-allowed disabled:opacity-45";
 
   return (
-    <div ref={rootRef} className="pointer-events-auto absolute bottom-16 right-7 z-50 flex flex-col items-end gap-2">
+    <div
+      ref={rootRef}
+      aria-hidden={hidden || undefined}
+      className={`absolute bottom-16 right-7 z-50 flex flex-col items-end gap-2 transition-opacity duration-300 ${hidden ? "pointer-events-none opacity-0" : "pointer-events-auto opacity-100"}`}
+    >
       {open && (
         <div data-allow-native-scroll="true" className={`${adminOpen ? "w-[24rem]" : "w-56"} max-h-[72vh] overflow-y-auto rounded-2xl border border-ink/15 bg-paper/95 p-3 text-ink shadow-[0_18px_70px_rgba(0,0,0,0.34)] backdrop-blur-md`}>
           <div className="mb-2 flex items-center justify-between gap-3">
@@ -1464,9 +1233,12 @@ function QualityGear({
         aria-label="Quality settings"
         aria-expanded={open}
         onClick={handleCogClick}
-        className="grid h-9 w-9 place-items-center rounded-full border border-inkSoft/15 bg-[#120d09]/45 font-sans text-sm text-inkSoft/60 shadow-[0_10px_34px_rgba(0,0,0,0.22)] backdrop-blur-md transition hover:border-inkSoft/25 hover:bg-[#120d09]/65 hover:text-inkSoft/85"
+        className="grid h-9 w-9 place-items-center rounded-full border border-paper/10 bg-[#120d09]/45 text-paper/50 shadow-[0_10px_34px_rgba(0,0,0,0.22)] backdrop-blur-md transition hover:border-paper/20 hover:bg-[#120d09]/65 hover:text-paper/85"
       >
-        ⚙
+        <svg aria-hidden viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+        </svg>
       </button>
     </div>
   );
@@ -1488,7 +1260,7 @@ function LibraryToggle({
   const options: LibraryMode[] = ["collection", "wantlist"];
 
   return (
-    <div className="pointer-events-auto absolute left-1/2 top-7 z-20 flex -translate-x-1/2 rounded-full border border-paper/12 bg-[#120d09]/55 p-1 shadow-[0_12px_44px_rgba(0,0,0,0.24)] backdrop-blur-md">
+    <div className="pointer-events-auto absolute left-1/2 top-7 z-20 flex -translate-x-1/2 rounded-full border border-paper/10 bg-[#120d09]/55 p-1 shadow-[0_12px_44px_rgba(0,0,0,0.24)] backdrop-blur-md">
       {options.map((item) => {
         const active = mode === item;
         const loading = item === "wantlist" && wantlistStatus === "loading";
@@ -1502,7 +1274,7 @@ function LibraryToggle({
               "rounded-full px-3 py-1.5 font-sans text-[9px] uppercase tracking-[0.24em] transition",
               active
                 ? "bg-paper/90 text-[#160f09] shadow-[0_0_18px_rgba(236,219,184,0.12)]"
-                : "text-paper/62 hover:bg-paper/10 hover:text-paper",
+                : "text-paper/60 hover:bg-paper/10 hover:text-paper",
             ].join(" ")}
           >
             {loading ? "loading" : item}
@@ -1519,9 +1291,6 @@ function Header({
   wantlistStatus,
 }: {
   total: number;
-  // username/source props are accepted by callers but no longer rendered —
-  // the HUD now shows only the wordmark on the left and the record-count on
-  // the right, all in the same warm-cream tone for a calmer top edge.
   username?: string;
   source?: "discogs" | "demo";
   mode: LibraryMode;
@@ -1532,15 +1301,13 @@ function Header({
       ? "loading wantlist..."
       : wantlistStatus === "error"
         ? "wantlist unavailable"
-        : `${total} wanted · sort: a–z`
-    : `${total} records · sort: a–z`;
+        : `${total} wanted · sort: a-z`
+    : `${total} records · sort: a-z`;
 
   return (
     <div className="pointer-events-none absolute left-0 right-0 top-0 z-10 flex items-center justify-between p-7">
-      <div className="font-sans text-[10px] uppercase tracking-[0.32em] text-inkSoft/80">
-        <span className="serif italic text-inkSoft/80 text-sm normal-case tracking-normal">rycord</span>
-      </div>
-      <div className="font-sans text-[10px] uppercase tracking-[0.32em] text-inkSoft/80">
+      <span className="serif text-lg italic text-paper/75">rycord</span>
+      <div className="font-sans text-[10px] uppercase tracking-[0.32em] text-paper/50 tabular-nums">
         {countLabel}
       </div>
     </div>
@@ -1550,11 +1317,11 @@ function Header({
 function Footer() {
   return (
     <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 flex items-center justify-between p-7">
-      <div className="font-sans text-[10px] uppercase tracking-[0.32em] text-inkSoft/80">
+      <div className="font-sans text-[10px] uppercase tracking-[0.32em] text-paper/35">
         click any spine to pull out · scroll to zoom · click out to slide back
       </div>
-      <div className="font-sans text-[10px] uppercase tracking-[0.32em] text-inkSoft/80">
-        v0.1.14
+      <div className="font-sans text-[10px] uppercase tracking-[0.32em] text-paper/30">
+        v0.2.0
       </div>
     </div>
   );

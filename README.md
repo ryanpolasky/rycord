@@ -166,6 +166,8 @@ lib/
   releaseDetails.ts           Client-side release detail loader
   covers.ts                   Synthetic fallback records
   ledStore.ts                 Shared state for the remote, paper, and LED strip
+  fonts.ts                    next/font setup for Fraunces + Inter
+  canvasFonts.ts              Resolves those fonts for canvas-drawn spines and covers
 ```
 
 ## current limits

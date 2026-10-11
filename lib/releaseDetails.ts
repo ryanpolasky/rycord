@@ -1,8 +1,3 @@
-// Client-side loader for /api/release/<id> with module-scope cache + in-flight
-// dedupe. Both VinylRecord (for the back-cover tracklist) and InfoPanel (for
-// country + future fields) call this, so we only ever do one network round
-// trip per record per session.
-
 export type ReleaseTrack = {
   title: string;
   position?: string;

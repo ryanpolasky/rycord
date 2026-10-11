@@ -1,8 +1,3 @@
-// GET /api/release/<releaseId>
-//
-// Proxies Discogs' /releases/{id} endpoint and returns the bits we need for
-// the back cover/info panel. Results are persisted in data/releases/*.json.
-
 import { NextRequest, NextResponse } from "next/server";
 import { canonicalReleaseId, fetchReleaseDetails } from "@/lib/discogs";
 

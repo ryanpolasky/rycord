@@ -14,9 +14,8 @@ const config: Config = {
         paper: "#f0e7d6",
       },
       fontFamily: {
-        sans: ['"Inter"', "ui-sans-serif", "system-ui"],
-        serif: ['"Fraunces"', '"Cormorant Garamond"', "ui-serif", "serif"],
-        book: ['"Cormorant Garamond"', '"Fraunces"', "ui-serif", "serif"],
+        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui"],
+        serif: ["var(--font-serif)", "ui-serif", "serif"],
       },
     },
   },

@@ -3,17 +3,13 @@
 import * as THREE from "three";
 import { useMemo } from "react";
 
-// The "cozy room" — wood floor in front, plaster wall behind, baseboard
-// between, area rug under the shelf. Visible at the edges of the frame, gives
-// the shelf somewhere to LIVE.
-
 const FLOOR_W = 24;
 const FLOOR_D = 24;
 const WALL_W = 24;
 const WALL_H = 10;
 
 export default function Room() {
-  // Darker walnut floor — one continuous texture across the full plane.
+  // Darker walnut floor, one continuous texture across the full plane.
   const floorTex = useMemo(
     () => makeFloorWoodTexture("#5e3a23", "#3a2010"),
     [],
@@ -31,9 +27,7 @@ export default function Room() {
     return t;
   }, [floorTex]);
 
-  // Same mirror+integer idea for the wall plaster — much less visible
-  // since plaster has no oriented structure, but free defense against the
-  // same class of "I can see the tile" issue.
+  // mirrored so the tiling seams don't show
   const wallTexTiled = useMemo(() => {
     const t = wallTex.clone();
     t.wrapS = THREE.MirroredRepeatWrapping;
@@ -45,27 +39,24 @@ export default function Room() {
 
   return (
     <group>
-      {/* Wood floor — oversized so the side view never sees its edge. */}
+      {/* Wood floor, oversized so the side view never sees its edge. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.18, 0.4]} receiveShadow>
         <planeGeometry args={[FLOOR_W, FLOOR_D]} />
         <meshStandardMaterial map={floorTexTiled} roughness={0.82} metalness={0.04} />
       </mesh>
 
-      {/* Back wall — dusty deep plaster with a hint of texture, behind everything */}
+      {/* Back wall, dusty deep plaster with a hint of texture, behind everything */}
       <mesh position={[0, 0.5, -0.5]} receiveShadow>
         <planeGeometry args={[WALL_W, WALL_H]} />
         <meshStandardMaterial map={wallTexTiled} color="#5a4332" roughness={1.0} />
       </mesh>
 
-      {/* baseboard trim — thin warm-painted strip along the floor/wall seam */}
+      {/* baseboard trim, thin warm-painted strip along the floor/wall seam */}
       <mesh position={[0, -0.16, -0.485]} receiveShadow>
         <boxGeometry args={[WALL_W, 0.05, 0.012]} />
         <meshStandardMaterial color="#6b5240" roughness={0.9} />
       </mesh>
 
-      {/* Area rug — sits just in front of the shelf, parallel to the wall so
-          it actually looks placed (vs. crooked). Wider than it is deep, which
-          matches how a real rug under a shelf is laid. */}
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, -0.179, 0.35]}
@@ -151,7 +142,7 @@ function makeFloorWoodTexture(base: string, dark: string): THREE.CanvasTexture {
   return tex;
 }
 
-// soft mottled plaster — wash from upper-left
+// soft mottled plaster, wash from upper-left
 function makePlasterTexture(base: string): THREE.CanvasTexture {
   const c = document.createElement("canvas");
   c.width = 512;
@@ -192,7 +183,7 @@ function makeRugTexture(): THREE.CanvasTexture {
   c.height = 320;
   const ctx = c.getContext("2d")!;
 
-  // wool base — warm dusty pink
+  // wool base, warm dusty pink
   ctx.fillStyle = "#b8806f";
   ctx.fillRect(0, 0, 512, 320);
 
@@ -224,7 +215,7 @@ function makeRugTexture(): THREE.CanvasTexture {
     ctx.stroke();
   }
 
-  // wool noise — speckled fibre
+  // wool noise, speckled fibre
   const img = ctx.getImageData(0, 0, 512, 320);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {

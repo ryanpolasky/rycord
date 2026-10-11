@@ -2,10 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..800;1,9..144,300..800&family=Cormorant+Garamond:ital,wght@0,300..700;1,300..700&family=Inter:wght@300..600&display=swap");
-
-/* "rainy cafe" palette — warm, cozy, dusty.
-   intentionally distinct from rylive's dark-industrial. */
 :root {
   --bg: #e8dfd0;        /* oat / aged paper */
   --bg-deep: #d4c9b6;   /* dusty cream */
@@ -21,7 +17,7 @@ html, body, #__next {
   height: 100%;
   background: var(--bg);
   color: var(--ink);
-  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
   font-weight: 400;
   letter-spacing: -0.005em;
 }
@@ -31,17 +27,10 @@ body {
 }
 
 .serif {
-  font-family: "Fraunces", "Cormorant Garamond", ui-serif, serif;
+  font-family: var(--font-serif), ui-serif, serif;
   font-feature-settings: "ss01" on, "ss03" on;
 }
 
-.book {
-  font-family: "Cormorant Garamond", "Fraunces", ui-serif, serif;
-}
-
-/* Subtle scrollbar styling for in-panel scroll regions (the notes section
-   in the InfoPanel). Reads as "barely there" — a thin warm-grey thumb
-   only when actively scrolled, no track gutter. */
 .rycord-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgba(90, 75, 58, 0.25) transparent;
@@ -58,6 +47,23 @@ body {
 }
 .rycord-scroll::-webkit-scrollbar-thumb:hover {
   background-color: rgba(90, 75, 58, 0.45);
+}
+
+.rycord-tip {
+  animation: rycord-tip-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rycord-tip-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 3px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rycord-tip {
+    animation: none;
+  }
 }
 
 .rycord-loader-dot {

@@ -17,8 +17,7 @@ const SZ = 0.30;
 // puts the spine right at the cell's front opening
 const SHELF_REST_Z = -0.151;
 
-// negative x centres the record in the canvas left of the info panel.
-// z is safe this close because Scene snaps scrollDolly to 0 on activate.
+// negative x centres the record in the canvas left of the info panel
 const FLOAT_TARGET = { x: -0.10, y: 0.17, z: 0.55 };
 
 // tips the top edge down and toward the camera, like peeking through a crate
@@ -51,8 +50,28 @@ const CLOSE_HANDOFF_P = 0.18;
 // maps local +x (cover front) to world +z
 const FRONT_FACE_Y = -Math.PI / 2;
 
+const TOP_EDGE_SHADE = 0.08;
+
 // shared across every record so we upload one geometry instead of N
-const JACKET_GEOMETRY = new THREE.BoxGeometry(SX, SY, SZ);
+const JACKET_GEOMETRY = (() => {
+  const g = new THREE.BoxGeometry(SX, SY, SZ);
+  const src = g.getIndex()!.array;
+  const faceOrder = [0, 1, 4, 2, 3, 5];
+  const index: number[] = [];
+  for (const f of faceOrder) for (let i = 0; i < 6; i++) index.push(src[f * 6 + i]);
+  g.setIndex(index);
+  g.clearGroups();
+  g.addGroup(0, 6, 0);
+  g.addGroup(6, 6, 1);
+  g.addGroup(12, 6, 2);
+  g.addGroup(18, 18, 3);
+  // near-black top edge so the led cove glow doesn't stripe the tops of the records
+  const count = g.getAttribute("position").count;
+  const colors = new Float32Array(count * 3).fill(1);
+  for (let v = 8; v < 12; v++) colors.fill(TOP_EDGE_SHADE, v * 3, v * 3 + 3);
+  g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  return g;
+})();
 
 type Props = {
   rec: DemoRecord;
@@ -69,18 +88,17 @@ type Props = {
 
 export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled = false, quality = "high", onSelect, onRetracted, flipSignal = 0 }: Props) {
   const group = useRef<THREE.Group>(null);
+  const mesh = useRef<THREE.Mesh>(null);
   const [hover, setHover] = useState(false);
 
-  // pull 0 = nested in shelf, 1 = floating. close waits for the spin to
-  // decay and wrap to 0 so the spine always re-enters the cell forward.
+  // pull 0 = nested, 1 = floating. closing waits for the spin to unwind so the spine re-enters forward
   const pullState = useRef({ p: 0, v: 0 });
   const hoverState = useRef({ p: 0, v: 0 });
   const wasPulledOut = useRef(false);
   const needsRetractHandoff = useRef(false);
   // accumulated offset from the FRONT_FACE_Y baseline
   const spinAngle = useRef(0);
-  // rad/s, nonzero only while dragging or decaying. ambient rock eases
-  // spinAngle directly so residual velocity can't offset it.
+  // rad/s, only nonzero while dragging or decaying
   const spinVel = useRef(0);
   const spinRestCenter = useRef(0);
   const commandedSpinTarget = useRef<number | null>(null);
@@ -95,30 +113,12 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
   });
   const flipDirection = useRef(1);
 
-  // placeholder while the real cover loads, and the only texture without one
-  const { proceduralCoverMap, spineMap, edgeColor, topEdgeColor } = useMemo(() => {
-    if (typeof document === "undefined") {
-      return {
-        proceduralCoverMap: null,
-        spineMap: null,
-        edgeColor: rec.palette.bg,
-        topEdgeColor: rec.palette.bg,
-      };
-    }
-    const faceSize = quality === "low" ? 512 : 1024;
-    // only a placeholder when a real cover is coming, so it can be smaller
-    const coverSize = rec.coverUrl ? Math.min(faceSize, 512) : faceSize;
+  const edgeColor = useMemo(() => shadeHex(rec.palette.bg, -0.18), [rec.palette.bg]);
+  const spineMap = useMemo(() => {
+    if (typeof document === "undefined") return null;
     const spineW = quality === "low" ? 32 : 48;
     const spineH = quality === "low" ? 1200 : 2400;
-    const cover = generateCoverCanvas(rec, coverSize);
-    const spine = generateSpineCanvas(rec, spineW, spineH);
-    return {
-      proceduralCoverMap: canvasTexture(cover, quality),
-      spineMap: canvasTexture(spine, quality),
-      edgeColor: shadeHex(rec.palette.bg, -0.18),
-      // near-black so the led cove glow doesn't stripe the tops of the records
-      topEdgeColor: shadeHex(rec.palette.bg, -0.7),
-    };
+    return canvasTexture(generateSpineCanvas(rec, spineW, spineH), quality);
   }, [rec, quality]);
 
   // the back is only visible once pulled out and flipped, so build it lazily
@@ -127,14 +127,26 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
     if (active) setEverActive(true);
   }, [active]);
 
+  const [coverFailed, setCoverFailed] = useState(false);
+  const [realCoverMap, setRealCoverMap] = useState<THREE.Texture | null>(null);
+
+  // cover faces hide between neighbours, so only draw a placeholder when it'll be seen
+  const needsPlaceholder = !rec.coverUrl || coverFailed || (everActive && !realCoverMap);
+  const proceduralCoverMap = useMemo(() => {
+    if (!needsPlaceholder || typeof document === "undefined") return null;
+    const faceSize = quality === "low" ? 512 : 1024;
+    const coverSize = rec.coverUrl ? Math.min(faceSize, 512) : faceSize;
+    return canvasTexture(generateCoverCanvas(rec, coverSize), quality);
+  }, [needsPlaceholder, rec, quality]);
+
   const proceduralBackMap = useMemo(() => {
     if (!everActive || typeof document === "undefined") return null;
     const faceSize = quality === "low" ? 512 : 1024;
     return canvasTexture(generateBackCanvas(rec, faceSize), quality);
   }, [everActive, rec, quality]);
 
-  const [realCoverMap, setRealCoverMap] = useState<THREE.Texture | null>(null);
   useEffect(() => {
+    setCoverFailed(false);
     if (!rec.coverUrl) {
       setRealCoverMap(null);
       return;
@@ -158,7 +170,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
       },
       undefined,
       () => {
-        // keep the procedural fallback
+        if (!cancelled) setCoverFailed(true);
       },
     );
     return () => {
@@ -168,8 +180,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
 
   const coverMap = realCoverMap ?? proceduralCoverMap;
 
-  // discogs only ships country on the release endpoint, not the collection
-  // one, so activating is the first chance to put real data on the back
+  // country only comes from the release endpoint, so the real back is built on activation
   const [realBackMap, setRealBackMap] = useState<THREE.Texture | null>(null);
   useEffect(() => {
     if (!active) return;
@@ -198,18 +209,20 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
 
   const backMap = realBackMap ?? proceduralBackMap;
 
-  // the back map starts null and appears on first activation. three only
-  // compiles USE_MAP into the shader when a map is present, and assigning
-  // .map later does not retrigger that, so the face would stay untextured.
+  // maps that start null need a recompile, three only adds USE_MAP when one is present
   const backMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const coverMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const hasBackMap = backMap !== null;
+  const hasCoverMap = coverMap !== null;
   useEffect(() => {
     if (backMatRef.current) backMatRef.current.needsUpdate = true;
-  }, [backMap]);
+  }, [hasBackMap]);
+  useEffect(() => {
+    if (coverMatRef.current) coverMatRef.current.needsUpdate = true;
+  }, [hasCoverMap]);
 
-  useEffect(() => () => {
-    proceduralCoverMap?.dispose();
-    spineMap?.dispose();
-  }, [proceduralCoverMap, spineMap]);
+  useEffect(() => () => proceduralCoverMap?.dispose(), [proceduralCoverMap]);
+  useEffect(() => () => spineMap?.dispose(), [spineMap]);
 
   useEffect(() => () => proceduralBackMap?.dispose(), [proceduralBackMap]);
   useEffect(() => () => realCoverMap?.dispose(), [realCoverMap]);
@@ -240,6 +253,9 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
     if (!group.current) return;
     const dt = Math.min(rawDt, 0.05);
     const t = state.clock.elapsedTime;
+
+    // a shelved jacket is thinner than a shadow texel, so only cast once it's out
+    if (mesh.current) mesh.current.castShadow = quality !== "low" && (active || pullState.current.p > 0.01);
 
     // fully settled and nested, so everything below would be a no-op
     if (
@@ -293,8 +309,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
       onRetracted?.();
     }
 
-    // overlapping stages: extract from the cell, travel + turn to face
-    // camera, then settle at FLOAT_TARGET
+    // overlapping stages: extract from the cell, travel + turn to face camera, then settle at FLOAT_TARGET
     const eExtract = easeInOutCubic(clamp01(p / 0.45));
     const eTravel  = easeInOutCubic(clamp01((p - 0.20) / 0.65));
     const eFloat   = easeInOutCubic(clamp01((p - 0.55) / 0.45));
@@ -314,8 +329,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
 
     const baseRotation = FRONT_FACE_Y * eTravel;
 
-    // gated on p rather than the spring settling, whose decay tail is long
-    // enough that the record already looks stationary
+    // gated on p rather than the spring settling, whose decay tail is long enough that the record already looks stationary
     if (active && !closing.current && p > 0.85) {
       if (frontHoldStart.current === null) frontHoldStart.current = t;
     } else if (!active && p < 0.5) {
@@ -392,8 +406,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
           dragRef.current.moved = false;
           return;
         }
-        // swallow it so onPointerMissed can't dismiss, and so it can't
-        // raycast through to a record behind this one
+        // swallow it so onPointerMissed can't dismiss, and so it can't raycast through to a record behind this one
         e.stopPropagation();
         // dismissing is empty-space or the InfoPanel escape only
         if (active) return;
@@ -422,8 +435,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
           dragRef.current.lastX = ev.clientX;
           dragRef.current.lastT = now;
 
-          // positive dx sweeps the cover's right edge toward the camera,
-          // which is a positive y rotation in three's right-handed coords
+          // positive dx swings the cover's right edge toward the camera
           const dRot = dx * DRAG_RAD_PER_PX;
           spinAngle.current += dRot;
           spinVel.current = dRot / dtS;
@@ -436,8 +448,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
           window.removeEventListener("pointerup", onUp);
           window.removeEventListener("pointercancel", onUp);
 
-          // r3f re-raycasts on click, so after a drag the synthetic click
-          // can land on a record behind this one. swallow it.
+          // r3f re-raycasts on click, so after a drag the synthetic click can land on a record behind this one
           if (wasMoved) {
             const suppressClick = (ev: Event) => {
               ev.stopImmediatePropagation();
@@ -445,8 +456,7 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
               window.removeEventListener("click", suppressClick, true);
             };
             window.addEventListener("click", suppressClick, true);
-            // some browsers skip the click entirely after a large move, so
-            // tear the listener down rather than leave it armed
+            // some browsers skip the click after a big move, so don't leave this armed
             setTimeout(() => {
               window.removeEventListener("click", suppressClick, true);
             }, 50);
@@ -458,14 +468,11 @@ export default function VinylRecord({ rec, shelfX, shelfY = 0, active, disabled 
         window.addEventListener("pointercancel", onUp);
       }}
     >
-      <mesh castShadow={quality !== "low"} receiveShadow={quality !== "low"} geometry={JACKET_GEOMETRY}>
-        {/* +x cover front, -x back, +y top edge, -y bottom, +z spine, -z back edge */}
-        <meshStandardMaterial attach="material-0" map={coverMap} roughness={0.55} metalness={0.04} />
+      <mesh ref={mesh} receiveShadow={quality !== "low"} geometry={JACKET_GEOMETRY}>
+        <meshStandardMaterial ref={coverMatRef} attach="material-0" map={coverMap} color={coverMap ? "#ffffff" : edgeColor} roughness={0.55} metalness={0.04} />
         <meshStandardMaterial ref={backMatRef} attach="material-1" map={backMap} color={backMap ? "#ffffff" : edgeColor} roughness={0.55} metalness={0.04} />
-        <meshStandardMaterial attach="material-2" color={topEdgeColor} roughness={1.0} metalness={0} />
-        <meshStandardMaterial attach="material-3" color={edgeColor} roughness={0.9} />
-        <meshStandardMaterial attach="material-4" map={spineMap} roughness={0.7} metalness={0.02} />
-        <meshStandardMaterial attach="material-5" color={edgeColor} roughness={0.9} />
+        <meshStandardMaterial attach="material-2" map={spineMap} roughness={0.7} metalness={0.02} />
+        <meshStandardMaterial attach="material-3" color={edgeColor} vertexColors roughness={0.9} />
       </mesh>
     </group>
   );

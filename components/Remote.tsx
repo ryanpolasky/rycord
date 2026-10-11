@@ -21,20 +21,12 @@ import {
   useLedState,
 } from "@/lib/ledStore";
 
-// Cheap chinesium IR LED remote — thin white plastic, black border, with the
-// classic 4×6 button grid (brightness, OFF/ON, 12 colors + W, FLASH/STROBE/
-// FADE/SMOOTH down the right column).
-//
-// Two states:
-//   stowed:   sits flat on the floor; clicking ANY part of it summons it
-//   summoned: floats up + forward + rotates to face the camera, individual
-//             buttons become hit-targetable; clicking empty space dismisses
-//             it back to the floor.
+// the classic cheap 24-key ir led remote
 
 type Props = {
-  /** World position to stow the remote (rests on the rug). */
+  // World position to stow the remote (rests on the rug).
   position: [number, number, number];
-  /** Rotation in radians [x,y,z] when stowed. */
+  // Rotation in radians [x,y,z] when stowed.
   rotation?: [number, number, number];
 };
 
@@ -53,9 +45,6 @@ function clearPointer(e: ThreeEvent<PointerEvent>) {
   document.body.style.cursor = "auto";
 }
 
-// Multiply a hex color by a scalar in [0..1] and return a new hex string.
-// Used for the press-dim tactile feedback. Cheap and avoids allocating a
-// new THREE.Color per render.
 function dimHex(hex: string, k: number): string {
   if (k >= 1) return hex;
   const h = hex.replace("#", "");
@@ -66,12 +55,6 @@ function dimHex(hex: string, k: number): string {
   const toHex = (v: number) => v.toString(16).padStart(2, "0");
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
-
-// Layout: 6 rows × 4 cols of buttons.
-// Each button is one of:
-//   - color: clicking sets the accent color to `color`
-//   - command: clicking runs a specific action
-// The layout matches the reference photo top-to-bottom.
 
 type Btn =
   | { kind: "color"; color: string; label?: string }
@@ -116,8 +99,6 @@ const GRID: Btn[][] = [
   ],
 ];
 
-// Reused every frame so the pose maths allocates nothing. Safe as module
-// state because each useFrame pass reads and writes these synchronously.
 const SCRATCH = {
   camDir: new THREE.Vector3(),
   forward: new THREE.Vector3(),
@@ -159,8 +140,7 @@ export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
     t.current += (target - t.current) * Math.min(1, dt * omega);
     if (Math.abs(target - t.current) < SETTLE_EPS) t.current = target;
 
-    // Runs before the pose early-out below so a pressed button always
-    // releases even while the remote is stowed.
+    // before the early-out so a pressed button releases even while stowed
     if (pressedRef.current && performance.now() / 1000 > pressedRef.current.until) {
       pressedRef.current = null;
       setTick((x) => x + 1);
@@ -168,24 +148,17 @@ export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
 
     if (!groupRef.current) return;
 
-    // At t=0 the pose is the caller's fixed stowed transform, so once it has
-    // been written it cannot change until the remote is summoned again.
+    // at t=0 the stowed pose can't change until the remote is summoned again
     if (t.current === 0) {
       if (stowedWritten.current) return;
     } else {
       stowedWritten.current = false;
     }
 
-    // Build the summoned pose: anchored in front of the camera, slightly
-    // below center so the remote sits in the lower-half of the frame and
-    // doesn't cover the records.
     const camPos = camera.position;
     const camDir = SCRATCH.camDir;
     camera.getWorldDirection(camDir);
-    // Summon a touch FARTHER from camera (so the remote appears slightly
-    // smaller and the full 6-row grid fits comfortably in frame) and
-    // RAISE it relative to the camera's lookAt so the bottom row of
-    // buttons is well above the viewport bottom edge.
+    // far enough back that all six rows fit, raised so the bottom row clears the viewport
     const forward = SCRATCH.forward.copy(camDir).multiplyScalar(0.62);
     const openPos = SCRATCH.openPos.copy(camPos).add(forward).add(DOWN_NUDGE);
 
@@ -194,22 +167,11 @@ export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
     const cur = stowedPos.lerp(openPos, t.current);
     groupRef.current.position.copy(cur);
 
-    // Interpolate rotation between stowed (flat on floor) and summoned
-    // (held up to face the camera).
     const stowedQ = SCRATCH.stowedQ.setFromEuler(
       SCRATCH.euler.set(rotation[0], rotation[1], rotation[2]),
     );
 
-    // Build the summoned orientation by composing the world-frame axes we
-    // want the remote's local axes to map onto:
-    //   - local +Y face   → toward camera (dirToCamera)
-    //   - local -Z top    → screen up (the +Y component of world up,
-    //                       projected perpendicular to dirToCamera)
-    //   - local +X right  → screen right
-    //
-    // This is the only right-handed assignment that keeps the buttons
-    // upright AND not-mirrored: face=+Y / top=+Z / right=+X would form a
-    // left-handed frame, so we must use -Z for screen-up rather than +Z.
+    // face +Y to camera, -Z up, +X right. +Z up would be left-handed and mirror the buttons
     const yAxis = SCRATCH.yAxis.copy(camPos).sub(openPos).normalize();
     const screenUp = SCRATCH.screenUp
       .copy(WORLD_UP)
@@ -241,8 +203,6 @@ export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
       setRemoteOpen(true);
       return;
     }
-    // 80ms tactile flash; just long enough to read as a press without
-    // looking like the button got disabled.
     pressedRef.current = { key, until: performance.now() / 1000 + 0.08 };
     setTick((x) => x + 1);
 
@@ -251,32 +211,13 @@ export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
       setLedPattern("static");
     } else {
       switch (btn.cmd) {
-        // bump by 0.18 per press; bumpIntensity clamps to ~0.2..2.6 so the
-        // user can hold-and-mash these without blacking out or blowing
-        // bloom past sane levels.
         case "brightUp": bumpIntensity(0.18); break;
         case "brightDown": bumpIntensity(-0.18); break;
         case "off": setLedEnabled(false); break;
-        // ON: restore the default rainbow gradient (matches the room's
-        // default state). Press a color button after to override.
         case "on": setLedEnabled(true); setLedPattern("rainbow"); break;
-        // FLASH = hard on/off strobing variants. Multi-press cycles
-        // through (1) hard white strobe, (2) accent-color strobe,
-        // (3) sparse rainbow lightning flashes.
         case "flash": stepFlash(); break;
-        // STROBE = bright moving waves with strobe overlay. Multi-press
-        // cycles through (1) pulse-wave running left→right, (2) high-
-        // contrast running rainbow gradient, (3) two-color split with
-        // strobe overlay.
         case "strobe": stepStrobe(); break;
-        // FADE = palette-flavored slowly-sliding gradient. Multi-press
-        // cycles through (1) full rainbow drift, (2) warm gradient,
-        // (3) cool gradient, (4) sunset peach/amber/rose.
         case "fade": stepFade(); break;
-        // SMOOTH = animated rainbow variants. Multi-press cycles through
-        // (1) classic hue-slide rainbow [room default], (2) faster
-        // multi-band sweep, (3) rainbow that breathes, (4) bright
-        // rainbow comet bouncing across the strip.
         case "smooth": stepSmooth(); break;
       }
     }
@@ -293,26 +234,17 @@ export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
   const cellW = GRID_W / COLS;
   const cellD = GRID_D / ROWS;
 
-  // shared button mesh — small disk on top face of the remote
+  // shared button mesh, small disk on top face of the remote
   const buttonRadius = Math.min(cellW, cellD) * 0.34;
 
-  // Body-mesh click handler: ABSORBS clicks that landed on the white
-  // plastic body (between buttons / on the border / on the IR emitter).
-  // Without this, those clicks "miss" any event-participating object,
-  // R3F fires `onPointerMissed`, and the Scene dismisses the remote —
-  // which is why some button presses appeared to do nothing (the user
-  // landed slightly off the button face).
+  // clicks on the plastic between buttons still count as hitting the remote
   const onBodyMeshClick = (e: { stopPropagation: () => void }) => {
     e.stopPropagation();
     if (!remoteOpen) setRemoteOpen(true);
-    // when already open, this is just a "swallow the click so the canvas
-    // doesn't treat it as empty-space" — no further action.
   };
 
   return (
     <group ref={groupRef} onClick={handleBodyClick} onPointerOver={swallowPointer} onPointerOut={clearPointer}>
-      {/* main body — thin white plastic. Small emissive so it reads as
-          "white plastic" in the dim cozy room (otherwise it falls into shadow). */}
       <mesh receiveShadow castShadow onClick={onBodyMeshClick}>
         <boxGeometry args={[W, H, D]} />
         <meshStandardMaterial
@@ -324,36 +256,22 @@ export default function Remote({ position, rotation = [0, 0, 0] }: Props) {
         />
       </mesh>
 
-      {/* black border trim — slightly outset, thinner. Also absorbs
-          clicks so border-zone clicks don't dismiss. */}
       <mesh position={[0, -H * 0.45, 0]} onClick={onBodyMeshClick}>
         <boxGeometry args={[W + 0.001, H * 0.5, D + 0.001]} />
         <meshStandardMaterial color="#161616" roughness={0.9} />
       </mesh>
 
-      {/* IR emitter — small dark disc at the top of the remote (-Z end).
-          Local -Z is the "top" of the remote (the end pointed AWAY from
-          the user when held). The summoned-pose construction maps -Z onto
-          screen-up, so this end appears at the top of the screen. */}
       <mesh position={[0, H / 2 + 0.0005, -D / 2 + 0.005]} onClick={onBodyMeshClick}>
         <cylinderGeometry args={[0.003, 0.003, 0.001, 12]} />
         <meshStandardMaterial color="#0a0a0a" roughness={0.5} />
       </mesh>
 
-      {/* Button grid.
-          Row 0 = brightness/OFF/ON sits at the TOP of the remote (local -Z).
-          When summoned, local -Z maps to screen-up, so row 0 ends up at the
-          top of the user's view. cIdx 0 sits at local -X = screen-left. */}
       {GRID.map((row, rIdx) =>
         row.map((btn, cIdx) => {
           const key = `${rIdx}-${cIdx}`;
           const x = -GRID_W / 2 + cellW / 2 + cIdx * cellW;
           const z = -GRID_D / 2 + cellD / 2 + rIdx * cellD;
           const pressed = pressedRef.current?.key === key;
-          // Tactile feedback is now a 120ms COLOR DIM on the button face
-          // (handled inside RemoteButton via the `pressed` prop), not a
-          // Z-translation. The 3D depress was sinking the button face
-          // INTO the shell, making it visually disappear for the dip.
           return (
             <RemoteButton
               key={key}
@@ -391,8 +309,6 @@ function RemoteButton({
   z: number;
   y: number;
   btn: Btn;
-  /** True for ~120ms after click. Dims the button face to give tactile
-   *  feedback without sinking the geometry below the shell. */
   pressed: boolean;
   radius: number;
   cellW: number;
@@ -400,19 +316,11 @@ function RemoteButton({
   onClick: (e: { stopPropagation: () => void }) => void;
   clickable: boolean;
 }) {
-  // Tactile dim: shave the face color/emissive lightly for ~80ms. Stays
-  // close to the base color so the dip reads as "user pressed a button"
-  // not "button just got disabled / went dark grey".
   const dim = pressed ? 0.82 : 1.0;
-  // Hover state no longer drives any emissive change — pressing is the
-  // only visual feedback. The press-depress is handled in the parent via
-  // the `pressed` ref + small Y-offset; here we just swap the mouse
-  // cursor on enter/leave so the button reads as clickable.
   if (btn.kind === "color") {
     return (
       <group position={[x, y, z]}>
-        {/* tinted background pad — also catches clicks (bigger hit-target than
-            the small colored disc on top). */}
+        {/* pad doubles as a bigger hit target than the disc */}
         <mesh
           position={[0, -0.0003, 0]}
           rotation={[-Math.PI / 2, 0, 0]}
@@ -456,11 +364,6 @@ function RemoteButton({
     );
   }
 
-  // command button
-  // - OFF: dark base, off-white text
-  // - ON:  red base, off-white text
-  // - all other grey buttons: light grey base, BLACK text (was "#2a2a2a" dark
-  //   grey, which read as low-contrast grey-on-grey)
   const isOff = btn.cmd === "off";
   const isOn = btn.cmd === "on";
   const buttonColor = btn.tone ?? (isOff ? "#1a1a1a" : isOn ? "#d24a3a" : "#cfcdc6");

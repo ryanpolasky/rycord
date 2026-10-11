@@ -13,8 +13,7 @@ import {
   useLedState,
 } from "@/lib/ledStore";
 
-// a scrap of paper on the rug. clicking summons it to face the camera,
-// clicking empty space puts it back. mutually exclusive with the remote.
+// a scrap of paper on the rug
 
 type Props = {
   // where the paper rests on the rug
@@ -93,8 +92,7 @@ export default function Paper({ position, rotation = [0, 0, 0] }: Props) {
       stowedWritten.current = false;
     }
 
-    // slightly above the camera's lookAt, so the note sits upper-middle and
-    // the linkedin line clears the footer hud
+    // above the lookAt so the linkedin line clears the footer hud
     const camPos = camera.position;
     const camDir = S.camDir;
     camera.getWorldDirection(camDir);

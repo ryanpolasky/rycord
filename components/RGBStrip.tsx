@@ -7,28 +7,20 @@ import { LEDS_PER_CELL, evalPattern, ACCENT_INTENSITY } from "@/lib/accent";
 import { getLedState } from "@/lib/ledStore";
 import type { PerformanceTier } from "@/lib/performance";
 
-// An "addressable" LED strip rendered as an InstancedMesh of small bright
-// boxes. Each LED gets its own color every frame, fed by the pattern
-// evaluator in `lib/accent.ts`. Visually the strip reads like a thin RGB
-// bar tucked under the top of the shelf; functionally it's WS2812-style
-// — we set N independent colors and the bloom pass blooms them.
-//
-// Two dim colored point lights at fixed positions along the strip sample
-// the LED colors at those positions, so the bounce light onto nearby
-// surfaces matches the current pattern (instead of being a static color).
+// ws2812-style strip: one instance per led, two point lights sample the pattern for bounce
 
 type Props = {
-  /** World-space center of the strip. */
+  // World-space center of the strip.
   position: [number, number, number];
-  /** Strip dimensions [length, height, depth] in meters. */
+  // Strip dimensions [length, height, depth] in meters.
   size: [number, number, number];
-  /** How many LEDs in this strip (override LEDS_PER_CELL). */
+  // How many LEDs in this strip (override LEDS_PER_CELL).
   count?: number;
-  /** If true, also place 2 bounce point lights along the strip. */
+  // If true, also place 2 bounce point lights along the strip.
   withLight?: boolean;
-  /** Bounce light intensity multiplier (light is sampled from pattern). */
+  // Bounce light intensity multiplier (light is sampled from pattern).
   lightMultiplier?: number;
-  /** Bounce light distance. */
+  // Bounce light distance.
   lightDistance?: number;
   tier?: PerformanceTier;
 };
@@ -48,9 +40,7 @@ export default function RGBStrip({
 
   const [length, height, depth] = size;
 
-  // per-LED footprint: divide the strip length into `count` slots, then
-  // make each LED box slightly smaller than the slot so there's a tiny
-  // gap between them (so you can SEE the LEDs as discrete units, not one bar).
+  // leds slightly smaller than their slot so they read as discrete units
   const slot = length / count;
   const ledW = slot * 0.78;
   const ledH = height;
@@ -60,12 +50,7 @@ export default function RGBStrip({
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const colorScratch = useMemo(() => new THREE.Color(), []);
 
-  // Snapshot of the last paint so we can skip the per-LED loop when nothing
-  // has changed AND the active pattern doesn't need a time-axis update. With
-  // 32-160 LEDs per strip this is the single largest per-frame allocation in
-  // the scene by call count. `static`/disabled patterns repaint exactly once
-  // after a state change and then idle at zero cost; time-dependent patterns
-  // (breath, chase, rainbow, strobes, etc.) keep painting every frame.
+  // static patterns paint once and then idle
   const lastPaintRef = useRef({
     pattern: "" as string,
     enabled: false,
@@ -96,9 +81,6 @@ export default function RGBStrip({
     const ledState = getLedState();
     const { pattern, enabled, color, intensity } = ledState;
 
-    // Time-axis dependence: every pattern except `static` animates over t.
-    // When disabled we treat the strip as static-off (one final paint to
-    // black, then nothing more until something changes).
     const isTimeDependent = enabled && pattern !== "static";
 
     const last = lastPaintRef.current;
@@ -109,10 +91,6 @@ export default function RGBStrip({
       last.color !== color ||
       last.intensity !== intensity;
 
-    // Skip the entire paint + light update if nothing changed AND the
-    // pattern doesn't need temporal updates. This is the hot path when the
-    // user has the strip on a solid color or off — the loop was burning
-    // 32-160 setColorAt() calls every frame for no visible benefit.
     if (!stateChanged && !isTimeDependent) return;
     if (isTimeDependent && paintAccum.current < 1 / updateFps) return;
     paintAccum.current = 0;
@@ -159,8 +137,7 @@ export default function RGBStrip({
     <group position={position}>
       <instancedMesh ref={ref} args={[undefined, undefined, count]} frustumCulled={false}>
         <boxGeometry args={[ledW, ledH, ledD]} />
-        {/* meshBasicMaterial: not lit by the scene, so per-LED color reads
-            cleanly and bright colors push into bloom thresholds. */}
+        {/* unlit so bright leds push past the bloom threshold */}
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
       {withLight && (

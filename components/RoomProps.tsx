@@ -5,13 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { setHoveredNote, type HoverNote } from "@/lib/hoverStore";
 
-// A few simple props to make the room feel lived-in: a small houseplant in
-// the corner, a framed picture on the wall, a stack of books on the floor,
-// and a mug sitting near the shelf. All low-poly + procedural textures so
-// they read as "stuff" without expensive geometry.
-
 type Props = {
-  /** Half-width of the shelf in world space, so props can sit just past it. */
+  // Half-width of the shelf in world space, so props can sit just past it.
   shelfHalfWidth?: number;
   wallArtUrls?: {
     left?: string;
@@ -43,8 +38,6 @@ export default function RoomProps({
   focusedArt = null,
   onSelectArt,
 }: Props) {
-  // Place props clear of the shelf — derive their x from shelfHalfWidth so they
-  // sit just to the side of the shelf no matter how wide the shelf grows.
   const padding = 0.22;          // breathing room past the shelf edge
   const wallZ = -0.39;           // close to back wall (wall is at z=-0.5)
   return (
@@ -70,22 +63,14 @@ export default function RoomProps({
         small
       />
 
-      {/* stack of books on the floor, in front of the shelf-left.
-          Books start at y=-0.178 (2mm above floor) — keeps the contact
-          shadow tight but avoids z-fighting with the floor plane. */}
+      {/* 2mm off the floor to dodge z-fighting */}
       <BookStack position={[-(shelfHalfWidth + padding - 0.04), -0.178, 0.42]} />
-      {/* coffee mug on top of the book stack. The stack total height is
-          22+28+18+25 = 93mm + 5mm initial offset, so its top sits at
-          y = -0.178 + 0.098 = -0.080. Sit the mug 1mm above that so its
-          shadow lands on the top book instead of fighting with it. */}
+      {/* sits on the stack: 93mm of books plus the 5mm offset */}
       <Mug position={[-(shelfHalfWidth + padding - 0.04), -0.079, 0.42]} />
     </group>
   );
 }
 
-// -------------------- Houseplant --------------------
-// pothos-style trailing plant in a terracotta pot — uses an alpha-cut leaf
-// texture so each leaf has a real organic shape (not a rectangle).
 function Houseplant({ position }: { position: [number, number, number] }) {
   const leavesGroup = useRef<THREE.Group>(null);
   const leafTex = useMemo(() => makeLeafTexture(), []);
@@ -125,7 +110,7 @@ function Houseplant({ position }: { position: [number, number, number] }) {
 
   return (
     <group position={position}>
-      {/* terracotta pot — tapered cylinder */}
+      {/* terracotta pot, tapered cylinder */}
       <mesh position={[0, 0.07, 0]} castShadow receiveShadow>
         <cylinderGeometry args={[0.075, 0.052, 0.14, 24]} />
         <meshStandardMaterial color="#8a4a3a" roughness={0.85} />
@@ -257,7 +242,7 @@ function PictureFrame({
       onPointerDown={onPointerDown}
       onClick={onClickFrame}
     >
-      {/* outer frame — dark walnut */}
+      {/* outer frame, dark walnut */}
       <mesh position={[0, 0, -0.005]} castShadow receiveShadow>
         <boxGeometry args={[w, h, 0.010]} />
         <meshStandardMaterial color="#23140b" roughness={0.62} metalness={0.04} />
@@ -298,7 +283,7 @@ function PictureFrame({
         <boxGeometry args={[liner, artH + liner * 2, 0.004]} />
         <meshStandardMaterial color="#c29558" roughness={0.28} metalness={0.38} />
       </mesh>
-      {/* inner artwork — slightly in front */}
+      {/* inner artwork, slightly in front */}
       <mesh position={[0, 0, 0.013]}>
         <planeGeometry args={[artW, artH]} />
         <meshStandardMaterial map={tex} roughness={0.58} />
@@ -427,7 +412,7 @@ function makeAbstractArtTexture(small: boolean): THREE.CanvasTexture {
   c.height = small ? 256 : 320;
   const ctx = c.getContext("2d")!;
   if (small) {
-    // small print — moody mountains, dusk palette
+    // small print, moody mountains, dusk palette
     const sky = ctx.createLinearGradient(0, 0, 0, c.height);
     sky.addColorStop(0, "#6e5440");
     sky.addColorStop(0.6, "#7a4633");
@@ -453,7 +438,7 @@ function makeAbstractArtTexture(small: boolean): THREE.CanvasTexture {
     ctx.fillStyle = sun;
     ctx.fillRect(0, 0, c.width, c.height);
   } else {
-    // large print — abstract color-field, dim version
+    // large print, abstract color-field, dim version
     const grad = ctx.createLinearGradient(0, 0, 0, c.height);
     grad.addColorStop(0, "#3a4838");
     grad.addColorStop(0.55, "#5a4a3a");
@@ -513,8 +498,7 @@ function BookStack({ position }: { position: [number, number, number] }) {
               <boxGeometry args={[b.w, b.h, b.d]} />
               <meshStandardMaterial color={b.color} roughness={0.7} />
             </mesh>
-            {/* book spine title on the +x face — too small to render text but
-                a contrasting hairline reads as "this is a book" */}
+            {/* too small for text, a contrasting hairline reads as a spine */}
             <mesh position={[b.w / 2 + 0.0015, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
               <planeGeometry args={[b.d * 0.85, b.h * 0.45]} />
               <meshStandardMaterial color={b.titleColor} roughness={0.9} />
@@ -540,11 +524,7 @@ function Mug({ position }: { position: [number, number, number] }) {
         <cylinderGeometry args={[0.032, 0.032, 0.001, 24]} />
         <meshStandardMaterial color="#2a1810" roughness={0.2} metalness={0.3} />
       </mesh>
-      {/* handle — half-torus standing vertically on the +X side of the body.
-          Rotation Z = -PI/2 swings the default arc (which opens toward -Y)
-          around so it opens toward -X (the body), giving a proper C-shape.
-          Position x is tuned so the top/bottom endpoints of the arc just
-          kiss the body surface at this height (radius ≈ 0.031). */}
+      {/* half torus rotated to open toward the body */}
       <mesh position={[0.035, 0.04, 0]} rotation={[0, 0, -Math.PI / 2]} castShadow>
         <torusGeometry args={[0.018, 0.005, 12, 24, Math.PI]} />
         <meshStandardMaterial color="#e0d2bc" roughness={0.45} />

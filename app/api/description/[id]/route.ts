@@ -1,22 +1,4 @@
-// GET /api/description/<releaseId>?artist=<artist>&title=<title>&year=<year>
-//                                   &genre=<genre>&label=<label>&country=<country>
-//
-// Resolves a short prose description for a record. Tries real sources first,
-// falls back to a small free LLM via OpenRouter only when no human-authored
-// source has anything usable. Discogs `notes` are intentionally NOT used as
-// a fallback — they're usually pressing/edition boilerplate, not prose.
-//
-//   1. Wikipedia (REST page/summary)                   — no auth
-//   2. Last.fm   (album.getInfo → wiki.summary)        — needs LASTFM_API_KEY
-//   3. OpenRouter                                      — needs OPENROUTER_API_KEY
-//        AI gets the full release metadata + tracklist as context so it can
-//        write a short factual paragraph instead of hallucinating from name.
-//
-// If all three miss (or the relevant keys aren't set) we return source: null
-// and an empty text so the InfoPanel renders a graceful empty state.
-//
-// Cached permanently in data/descriptions/*.json. Delete or edit the cache
-// file if you want to refresh or hand-tune an entry.
+// short album blurb: wikipedia, then last.fm, then openrouter, cached per release
 
 import { NextRequest, NextResponse } from "next/server";
 import { canonicalReleaseId, fetchReleaseDetails } from "@/lib/discogs";
@@ -67,13 +49,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     return NextResponse.json(toPayload(cached));
   }
 
-  // Strip release-variant suffixes ("(Deluxe Edition)", "[Remastered]", etc)
-  // for the Last.fm / Wikipedia lookups — those sources index the canonical
-  // album title, not the reissue variant.
+  // lookups index the canonical title, not "(Deluxe Edition)" style variants
   const cleanTitle = sanitizeTitle(title);
   const cleanArtist = sanitizeArtist(artist);
 
-  const where = `"${cleanArtist} — ${cleanTitle}" (id ${id})`;
+  const where = `"${cleanArtist} - ${cleanTitle}" (id ${id})`;
   const hasNames = Boolean(cleanArtist && cleanTitle);
 
   if (hasNames) {
@@ -119,8 +99,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     console.warn(`[rycord/description] skipping ai fallback for ${where}: OPENROUTER_API_KEY not set`);
   }
 
-  // All three sources missed — surface this so we can investigate. The
-  // per-source warns above explain WHY each one missed.
   console.warn(`[rycord/description] no description from any source for ${where}`);
   const empty: DescriptionPayload = { text: "", source: null, sourceUrl: null };
   return NextResponse.json(await cacheDescription(cacheKey, releaseId, { artist, title, year, genre, label, country }, empty));
@@ -145,10 +123,6 @@ async function cacheDescription(
   await writeJsonCache(file, "descriptions", `${cacheKey}.json`);
   return payload;
 }
-
-// ---------------------------------------------------------------------------
-// Last.fm
-// ---------------------------------------------------------------------------
 
 type LastfmAlbumInfo = {
   album?: {
@@ -177,22 +151,20 @@ async function tryLastfm(artist: string, album: string): Promise<DescriptionPayl
   });
   if (!r.ok) {
     const body = await r.text().catch(() => "");
-    console.warn(`[rycord/description] last.fm ${r.status} for "${artist} — ${album}": ${body.slice(0, 200)}`);
+    console.warn(`[rycord/description] last.fm ${r.status} for "${artist} - ${album}": ${body.slice(0, 200)}`);
     return null;
   }
   const data: LastfmAlbumInfo = await r.json();
   if (data.error) {
-    console.warn(`[rycord/description] last.fm error=${data.error} for "${artist} — ${album}"`);
+    console.warn(`[rycord/description] last.fm error=${data.error} for "${artist} - ${album}"`);
     return null;
   }
 
-  // Prefer wiki.summary (one or two sentences) over wiki.content (often the
-  // full Wikipedia article repeated verbatim with citations). Strip the
-  // CC-BY-SA license footer Last.fm appends to every wiki entry.
+  // content is often the whole wikipedia article, summary is a sentence or two
   const raw = data.album?.wiki?.summary ?? data.album?.wiki?.content ?? "";
   const text = cleanLastfmText(raw);
   if (text.length < 40) {
-    console.warn(`[rycord/description] last.fm wiki empty/short for "${artist} — ${album}" (${text.length} chars)`);
+    console.warn(`[rycord/description] last.fm wiki empty/short for "${artist} - ${album}" (${text.length} chars)`);
     return null; // skip tiny/empty entries
   }
 
@@ -208,8 +180,7 @@ function cleanLastfmText(raw: string): string {
   let s = raw.replace(/<a\s+href="https:\/\/www\.last\.fm[^>]*>.*?<\/a>\s*\.?/gis, "");
   // 2. Strip the User-contributed CC-BY-SA suffix that Last.fm tacks on.
   s = s.replace(/User-contributed text is available under[\s\S]*$/i, "");
-  // 3. Drop any remaining HTML tags (Last.fm's wiki field is usually plain
-  //    text but the Read-more anchor sometimes has friends).
+  // 3. drop any leftover html tags
   s = s.replace(/<[^>]+>/g, "");
   // 4. Decode the most common HTML entities by hand (no DOMParser server-side).
   s = s
@@ -223,10 +194,6 @@ function cleanLastfmText(raw: string): string {
   return s.trim().replace(/\s+$/g, "").replace(/\s{2,}/g, " ");
 }
 
-// ---------------------------------------------------------------------------
-// Wikipedia
-// ---------------------------------------------------------------------------
-
 type WikiSummary = {
   type?: string; // "standard" for a real page, "disambiguation" for a hub
   title?: string;
@@ -237,11 +204,6 @@ type WikiSummary = {
 type WikiOpenSearch = [string, string[], string[], string[]];
 
 async function tryWikipedia(artist: string, album: string, year: string): Promise<DescriptionPayload | null> {
-  // Try a series of likely article titles, most specific first. Wikipedia
-  // disambiguates albums as "<Album> (<Artist> album)" or "<Album> (album)"
-  // when there's no conflict. For self-titled albums we MUST disambiguate
-  // because the bare album name resolves to the band/artist page (e.g.
-  // "Weezer" → the band, not their 1994 self-titled debut).
   const selfTitled = album.toLowerCase() === artist.toLowerCase();
   const candidates = [
     `${album} (${artist} album)`,
@@ -260,8 +222,6 @@ async function tryWikipedia(artist: string, album: string, year: string): Promis
     };
   }
 
-  // Last resort: opensearch to find any article that mentions both. Pick the
-  // first non-disambiguation hit that looks like an album page.
   const search = `${artist} ${album} album`;
   const os = await fetchOpenSearch(search);
   if (!os || os.length === 0) {
@@ -278,25 +238,16 @@ async function tryWikipedia(artist: string, album: string, year: string): Promis
     };
   }
   console.warn(
-    `[rycord/description] wikipedia: ${candidates.length} candidates + ${Math.min(5, os.length)}/${os.length} opensearch hits all rejected for "${artist} — ${album}". opensearch sample: [${os.slice(0, 5).join(", ")}]`,
+    `[rycord/description] wikipedia: ${candidates.length} candidates + ${Math.min(5, os.length)}/${os.length} opensearch hits all rejected for "${artist} - ${album}". opensearch sample: [${os.slice(0, 5).join(", ")}]`,
   );
   return null;
 }
 
-// Predicate — does this look like the right album page?
-//   - is a real article (not a disambiguation hub or stub)
-//   - mentions the word "album" in the first sentence (so we don't pick up
-//     the band page on a self-titled or generic-named album)
-//   - mentions the artist's first significant word somewhere in title/extract
 function isUsableAlbumPage(hit: WikiSummary | null, artist: string, album: string): hit is WikiSummary {
   if (!hit) return false;
   if (hit.type === "disambiguation") return false;
   const extract = (hit.extract ?? "").trim();
   if (extract.length < 60) return false;
-  // Must read like an album entry near the top. Wikipedia's album leads
-  // almost universally include the word "album" in the first sentence
-  // (e.g. "X is the third studio album by ..."). Band/artist leads start
-  // with "X is an American rock band ..." — no "album" until much later.
   const firstSentence = extract.split(/(?<=[.!?])\s+/, 1)[0]?.toLowerCase() ?? "";
   if (!/\balbum\b/.test(firstSentence)) return false;
   // Sanity-check that the artist name appears somewhere.
@@ -335,17 +286,6 @@ async function fetchOpenSearch(query: string): Promise<string[] | null> {
   return Array.isArray(data) && Array.isArray(data[1]) ? data[1] : null;
 }
 
-// ---------------------------------------------------------------------------
-// OpenRouter — AI fallback when no real source has a description. Iterates
-// a small chain of free-tier models because individual models (especially the
-// Google AI Studio ones) get aggressively rate-limited; we want to ride past
-// transient 429s without surfacing an empty state to the user.
-//
-// Chain is configurable via the OPENROUTER_MODEL env var (comma-separated).
-// Order in DEFAULT_MODEL_CHAIN is tuned to put the most-reliable providers
-// first so the happy-path latency stays low.
-// ---------------------------------------------------------------------------
-
 type OpenRouterChoice = { message?: { content?: string } };
 type OpenRouterErrorMeta = { raw?: string; provider_name?: string; is_byok?: boolean };
 type OpenRouterError = { message?: string; code?: number; metadata?: OpenRouterErrorMeta };
@@ -363,10 +303,6 @@ type AiInput = {
 
 type ChatMessage = { role: "system" | "user"; content: string };
 
-// Default fallback chain. Order = reliability-first, quality-second. Mix
-// providers so a single upstream rate-limit (e.g. Google AI Studio 429ing
-// all gemma:free traffic) doesn't kill the whole fallback. Override at
-// runtime with OPENROUTER_MODEL="a,b,c" in .env.local.
 const DEFAULT_MODEL_CHAIN = [
   "openai/gpt-oss-120b:free",
   "meta-llama/llama-3.3-70b-instruct:free",
@@ -374,20 +310,7 @@ const DEFAULT_MODEL_CHAIN = [
   "z-ai/glm-4.5-air:free",
 ];
 
-// Module-scope state for adaptive chain ordering.
-//
-//   modelCooldown   maps model id → epoch ms when it becomes eligible again.
-//                   Set when a model 429/4xx/5xxs; skipped from the chain
-//                   until expiry. Avoids paying the 1-2s round-trip just to
-//                   re-discover "still rate-limited" on every request.
-//
-//   lastSuccessful  remembers which model answered most recently. Promoted
-//                   to chain head on the next request so warm traffic goes
-//                   straight to a known-working model instead of grinding
-//                   through the chain again.
-//
-// Both live for the process lifetime (Node module scope). A dev-server
-// restart resets them — acceptable cold-start cost.
+// models that recently failed get skipped until their cooldown expires
 const MODEL_COOLDOWN_MS = 90_000;
 const modelCooldown = new Map<string, number>();
 let lastSuccessfulModel: string | null = null;
@@ -424,9 +347,6 @@ function resolveModelChain(): string[] {
     ordered = [lastSuccessfulModel, ...base.filter((m) => m !== lastSuccessfulModel)];
   }
 
-  // Filter out models on cooldown. If EVERY model is cooled down, fall back
-  // to the full ordered chain — paying a 429 round-trip is better than
-  // surfacing an empty state to the user.
   const fresh = ordered.filter((m) => !isOnCooldown(m));
   return fresh.length > 0 ? fresh : ordered;
 }
@@ -441,8 +361,7 @@ function buildAiMessages(input: AiInput): ChatMessage[] {
     .filter(Boolean)
     .join(" · ");
 
-  // Cap tracklist context at 24 tracks so even box sets don't bloat the
-  // prompt. Numbered for clarity.
+  // box sets would bloat the prompt
   const trackBlock = input.tracks.slice(0, 24)
     .map((t, i) => `${i + 1}. ${t}`)
     .join("\n");
@@ -452,10 +371,10 @@ function buildAiMessages(input: AiInput): ChatMessage[] {
     `3-4 sentences. No flowery language, no hype, no marketing language. ` +
     `Cover: who the artist is, when/where the album sits in their work, what it sounds like, ` +
     `and a single sentence of context (what it's known for or how it was received). ` +
-    `If you genuinely don't recognize the album, lean on the metadata/tracklist provided and keep it brief — ` +
+    `If you genuinely don't recognize the album, lean on the metadata/tracklist provided and keep it brief - ` +
     `it's better to say less truthfully than to invent specifics. ` +
     `Never fabricate critic quotes, chart positions, or guest features. ` +
-    `Do NOT start with "This album..." — start with the artist or the album name. ` +
+    `Do NOT start with "This album..." - start with the artist or the album name. ` +
     `Plain prose only, no markdown, no bullet points, no headers.`;
 
   const userMsg = [
@@ -480,7 +399,7 @@ async function tryOpenRouter(input: AiInput): Promise<DescriptionPayload | null>
   const messages = buildAiMessages(input);
 
   const models = resolveModelChain();
-  const where = `"${input.artist} — ${input.title}"`;
+  const where = `"${input.artist} - ${input.title}"`;
 
   for (const model of models) {
     const result = await callOpenRouterOnce({ apiKey, model, messages, where });
@@ -489,14 +408,11 @@ async function tryOpenRouter(input: AiInput): Promise<DescriptionPayload | null>
   }
 
   console.warn(
-    `[rycord/description] openrouter: all ${models.length} models in chain failed for ${where} — chain: [${models.join(", ")}]`,
+    `[rycord/description] openrouter: all ${models.length} models in chain failed for ${where} - chain: [${models.join(", ")}]`,
   );
   return null;
 }
 
-// One attempt against one specific model. Returns null + logs on any
-// failure mode (HTTP error, embedded error field, or short response) so the
-// caller can advance to the next model in the chain.
 async function callOpenRouterOnce(opts: {
   apiKey: string;
   model: string;
@@ -514,8 +430,7 @@ async function callOpenRouterOnce(opts: {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        // OpenRouter recommends sending these for free-tier accounting and
-        // rate-limit headroom; they're optional but cost nothing.
+        // optional, but openrouter gives free-tier apps more headroom with them
         "HTTP-Referer": "https://rycord.com",
         "X-Title": "rycord",
       },
@@ -535,9 +450,7 @@ async function callOpenRouterOnce(opts: {
 
   if (!r.ok) {
     const body = await r.text().catch(() => "");
-    // OpenRouter wraps upstream errors in {error:{message,code,metadata:{raw}}};
-    // surface metadata.raw when present — it's the human-readable provider
-    // message (e.g. "google/X is temporarily rate-limited upstream...").
+    // metadata.raw holds the readable provider message when present
     let detail = body.slice(0, 300);
     try {
       const j = JSON.parse(body) as { error?: OpenRouterError };
@@ -560,8 +473,7 @@ async function callOpenRouterOnce(opts: {
 
   const text = (data.choices?.[0]?.message?.content ?? "").trim();
   if (text.length < 60) {
-    // Don't cool down on short responses — not the model's fault, the next
-    // request might get a longer answer.
+    // a short answer isn't the model failing, so no cooldown
     console.warn(
       `[rycord/description] openrouter short text (${model}, ${text.length} chars) for ${where}: ${JSON.stringify(text).slice(0, 200)}`,
     );
@@ -578,8 +490,7 @@ async function callOpenRouterOnce(opts: {
 }
 
 function cleanModelOutput(s: string): string {
-  // Strip any accidental markdown markers, leading "Album: " / "Sure, here is..."
-  // prefaces, and trailing model self-attribution that some free models add.
+  // free models love markdown, "Sure, here is..." prefaces, and signing their work
   return s
     .replace(/^\s*(sure,?\s+here(?:'s| is)[^\n]*\n+)/i, "")
     .replace(/^\s*(here(?:'s| is) (?:a )?(?:short )?(?:blurb|paragraph|description)[^\n]*\n+)/i, "")
@@ -609,14 +520,8 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// ---------------------------------------------------------------------------
-// Sanitization helpers
-// ---------------------------------------------------------------------------
-
 function sanitizeTitle(t: string): string {
   if (!t) return "";
-  // Strip the most common release-variant suffixes so we look up the
-  // canonical album title.
   return t
     .replace(/\s*[(\[][^)\]]*(deluxe|remaster\w*|anniversary|edition|expanded|reissue|bonus|special|version|mono|stereo|live|explicit|clean|hd|original|definitive|director'?s?\s+cut)[^)\]]*[)\]]/gi, "")
     .replace(/\s+-\s+(deluxe|remaster\w*|anniversary edition).*$/gi, "")
@@ -626,8 +531,7 @@ function sanitizeTitle(t: string): string {
 
 function sanitizeArtist(a: string): string {
   if (!a) return "";
-  // Discogs sometimes appends "(2)" for disambiguation — strip.
-  // Strip trailing ", The"/", A" if any (rare but happens for orchestras).
+  // discogs appends "(2)" to disambiguate same-name artists
   return a
     .replace(/\s+\(\d+\)$/g, "")
     .replace(/,\s*(the|a|an)$/i, "")

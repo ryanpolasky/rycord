@@ -1,8 +1,4 @@
-// GET /api/cover/<releaseId>?u=<absolute-discogs-cdn-url>
-//
-// Proxies a discogs CDN image so the browser sees it as same-origin (we need
-// canvas getImageData to work on the cover when we draw it into our procedural
-// jacket — discogs CDN omits CORS headers). Caches binary in data/covers.
+// discogs cdn omits cors headers, so covers are proxied same-origin for webgl
 
 import { NextRequest, NextResponse } from "next/server";
 import { fetchCoverCached } from "@/lib/cachedAssets";

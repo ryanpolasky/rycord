@@ -1,9 +1,3 @@
-// GET /api/collection?user=eggyb0i
-//
-// Fetches a Discogs user's collection, extracts a palette from each cover,
-// and returns the merged list. We process palettes in parallel with sharp so
-// even a 100+ collection lands in a few seconds.
-
 import { NextRequest, NextResponse } from "next/server";
 import { fetchCollectionResult } from "@/lib/discogs";
 import { derivePaletteCached } from "@/lib/cachedAssets";
@@ -35,8 +29,7 @@ export async function GET(req: NextRequest) {
   try {
     const result = await fetchCollectionResult(user, { refresh });
     const { releases } = result;
-    // Derive palettes in parallel, but cap concurrency so we don't hammer
-    // discogs CDN. 8-way is comfortable.
+    // capped so we don't hammer the discogs cdn
     const items: CollectionItem[] = [];
     const concurrency = 8;
     let cursor = 0;

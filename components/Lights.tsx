@@ -5,8 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { PerformanceTier } from "@/lib/performance";
 
-// every oscillator here is under 1hz, so stepping them at 20fps is
-// indistinguishable from 60 and cuts the light-update work by 3x
+// every oscillator here is under 1hz, so 20fps is indistinguishable from 60
 const LIGHTS_UPDATE_INTERVAL = 1 / 20;
 
 export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
@@ -62,8 +61,7 @@ export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
         shadow-radius={6}
       />
 
-      {/* no castShadow on purpose: a point light needs a 6-face cube map,
-          and the directional above already carries the room's shadows */}
+      {/* no castShadow: point light shadows need a 6-face cube map */}
       <pointLight
         ref={lamp}
         position={[0.55, 0.0, 0.35]}
@@ -94,8 +92,6 @@ export default function Lights({ tier = "high" }: { tier?: PerformanceTier }) {
         />
       )}
 
-      {/* normal-weighted, so it lifts the floor evenly without flattening
-          the back wall the way another lamp would */}
       <hemisphereLight color="#a47450" groundColor="#1a0f08" intensity={tier === "low" ? 1.05 : 0.55} />
 
       {/* just enough that deep shadows aren't pure black */}

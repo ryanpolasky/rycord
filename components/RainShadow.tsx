@@ -4,14 +4,7 @@ import * as THREE from "three";
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 
-// A translucent ripple-textured plane just in front of the wall, slowly
-// drifting upward and offsetting horizontally — reads as the shadow of
-// rain running down a window, cast onto the back wall. Almost invisible
-// but breaks the static "baked" feel of the scene.
-//
-// Uses straight NormalBlending of an RGBA texture with a transparent
-// background and dark streaks. MultiplyBlending was leaking the texture's
-// background color through and washing the wall out.
+// rain-on-a-window shadow drifting down the back wall
 
 export default function RainShadow() {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -41,9 +34,6 @@ function makeRainTexture(): THREE.CanvasTexture {
   c.height = 512;
   const ctx = c.getContext("2d")!;
 
-  // Fully transparent background — alpha 0 everywhere by default.
-  // We DRAW only the dark streaks + drops, which become a darkening overlay
-  // on whatever's behind them.
   ctx.clearRect(0, 0, 512, 512);
 
   // vertical streaks at varying widths, like water trails on glass

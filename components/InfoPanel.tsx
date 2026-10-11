@@ -25,18 +25,12 @@ const SOURCE_LABEL: Record<Exclude<Source, null>, string> = {
   ai: "ai-generated",
 };
 
-// Module-scope cache keyed by Discogs id so flipping between records doesn't
-// re-hit the API (and so the InfoPanel doesn't flash the loading state every
-// re-mount). Server has its own cache too, this is just to dedupe within the
-// session.
+// session cache so flipping between records doesn't flash the loading state
 const clientCache = new Map<string, DescState & { status: "ready" | "error" }>();
 
 export default function InfoPanel({ rec, onClose, onFlipBack }: Props) {
   const [desc, setDesc] = useState<DescState>({ status: "idle" });
-  // Country isn't part of basic_information on the Discogs collection
-  // endpoint — only on the full /releases/{id}. We fetch it lazily on
-  // record-open and overlay it on `rec.country` (which is "" for real
-  // Discogs entries and pre-populated for the demo seed records).
+  // country only comes from the full release endpoint, so it's fetched on open
   const [country, setCountry] = useState<string>("");
   const [year, setYear] = useState<number>(0);
   const [tracks, setTracks] = useState<ReleaseTrack[]>([]);
@@ -45,15 +39,10 @@ export default function InfoPanel({ rec, onClose, onFlipBack }: Props) {
 
   useEffect(() => {
     if (!rec) return;
-    // Seed with whatever the collection gave us (truthy only for demo seed
-    // records — real Discogs collection entries arrive with "").
     setCountry(rec.country ?? "");
     setYear(rec.year ?? 0);
     setTracks([]);
     setTracksLoaded(false);
-    // Then upgrade with the canonical country from the full release endpoint
-    // when it arrives. Shared cache with VinylRecord so this is a no-op
-    // network-wise the second time the user opens the same record.
     let cancelled = false;
     loadReleaseDetails(rec.id).then((details) => {
       if (cancelled) return;
@@ -117,10 +106,6 @@ export default function InfoPanel({ rec, onClose, onFlipBack }: Props) {
           transition={{ type: "spring", stiffness: 200, damping: 26 }}
           className="absolute right-0 top-0 bottom-0 z-20 flex w-[26rem] max-w-[88vw] flex-col gap-6 border-l border-inkSoft/25 bg-paper/[0.97] p-9 shadow-[-24px_0_60px_rgba(45,37,28,0.18)] backdrop-blur-2xl"
         >
-          {/* Sticky header: esc button + artist / album title. Stays pinned
-              while the metadata, notes, and tracklist scroll up underneath
-              it so the album's identity is always visible no matter how
-              deep the user scrolls. */}
           <div className="flex shrink-0 flex-col gap-6">
             <div className="flex items-center justify-end font-sans text-[10px] uppercase tracking-[0.32em] text-inkSoft/60">
               <button
@@ -136,10 +121,7 @@ export default function InfoPanel({ rec, onClose, onFlipBack }: Props) {
               <h1
                 className="serif mt-3 font-medium italic leading-[1.05] tracking-tight text-ink"
                 style={{
-                  // Auto-shrink the title font based on a per-character WEIGHT
-                  // (Japanese/Chinese/Hangul full-width chars count as 2). The
-                  // weight target is ~14 — past that, font shrinks linearly.
-                  // Floors out at 1.05rem so very long titles still fit.
+                  // shrink long titles, full-width cjk characters count double
                   fontSize: (() => {
                     const weight = [...rec.title].reduce((acc, c) => {
                       return acc + (/[\u3000-\u9FFF\uFF00-\uFFEF]/.test(c) ? 2 : 1);
@@ -156,14 +138,7 @@ export default function InfoPanel({ rec, onClose, onFlipBack }: Props) {
             </div>
           </div>
 
-          {/* Scrollable middle: metadata rows + notes + tracklist all share a
-              single scrollbar now, so long tracklists are reachable by
-              scrolling the whole panel instead of being trapped in a nested
-              scroll region. flex-1 + min-h-0 lets this absorb remaining
-              vertical space without pushing the sticky pills off-screen.
-              data-allow-native-scroll opts this region out of Scene.tsx's
-              global wheel hijack (which otherwise preventDefault's every
-              wheel tick to drive camera zoom / dolly). */}
+          {/* data-allow-native-scroll opts out of the scene's wheel hijack */}
           <div
             data-allow-native-scroll
             className="rycord-scroll -mr-2 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto pr-2 pb-2"
@@ -186,9 +161,6 @@ export default function InfoPanel({ rec, onClose, onFlipBack }: Props) {
             </div>
           </div>
 
-          {/* Sticky footer: action pills stay pinned at the bottom so the
-              user can flip the record or jump to Discogs from anywhere in
-              the scroll. */}
           <div className="flex shrink-0 gap-2 font-sans text-[10px] uppercase tracking-[0.28em] text-inkSoft/75">
             <Pill onClick={onFlipBack}>flip record</Pill>
             <Pill onClick={() => window.open(`https://www.discogs.com/release/${encodeURIComponent(rec.id)}`, "_blank", "noopener,noreferrer")}>
@@ -212,7 +184,7 @@ function DescBody({ desc }: { desc: DescState }) {
   if (desc.status === "error") {
     return (
       <p className="serif mt-3 text-[15px] italic leading-[1.55] text-inkSoft/45">
-        couldn't reach the description sources — try again later.
+        couldn't reach the description sources, try again later.
       </p>
     );
   }
@@ -223,8 +195,6 @@ function DescBody({ desc }: { desc: DescState }) {
       </p>
     );
   }
-  // Description scrolls inside its own panel region, so we don't truncate
-  // here anymore — let the full text flow and the user scroll if needed.
   return (
     <p className="serif mt-3 whitespace-pre-line pb-2 text-[15px] leading-[1.55] text-ink/80">
       {desc.text}

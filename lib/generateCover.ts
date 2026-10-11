@@ -1,11 +1,5 @@
-// Procedurally render an album cover to a canvas, given a record's palette.
-// Returns a HTMLCanvasElement that R3F can wrap in a CanvasTexture.
-//
-// Aesthetic: "rainy cafe" — warm soft backgrounds, book-jacket serif titles,
-// subtle paper grain, gentle highlights. Each cover samples its own palette,
-// and the SPINE re-uses that palette so spines and covers feel of-a-piece.
-
 import type { DemoRecord } from "./covers";
+import { canvasFonts } from "./canvasFonts";
 
 export function generateCoverCanvas(rec: DemoRecord, size = 1024): HTMLCanvasElement {
   const c = document.createElement("canvas");
@@ -25,7 +19,7 @@ export function generateCoverCanvas(rec: DemoRecord, size = 1024): HTMLCanvasEle
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
 
-  // big colorblock accent — low-rise rectangle, slightly translucent
+  // big colorblock accent, low-rise rectangle, slightly translucent
   ctx.fillStyle = withAlpha(rec.palette.accent, 0.82);
   const blockH = size * 0.16;
   const blockY = size * 0.66;
@@ -34,18 +28,16 @@ export function generateCoverCanvas(rec: DemoRecord, size = 1024): HTMLCanvasEle
   // paper grain
   paperGrain(ctx, size, 0.045);
 
-  // title (serif — book jacket)
+  // title (serif, book jacket)
   ctx.fillStyle = rec.palette.ink;
-  ctx.font = `italic 500 ${Math.round(size * 0.12)}px "Fraunces", "Cormorant Garamond", "Times New Roman", serif`;
+  ctx.font = `italic 500 ${Math.round(size * 0.12)}px ${canvasFonts().serif}`;
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
   wrapText(ctx, rec.title, size * 0.08, size * 0.12, size * 0.84, size * 0.14);
 
-  // artist label (small caps tracking) — auto-shrinks font if the artist name
-  // is too long to fit the header width.
   ctx.fillStyle = withAlpha(rec.palette.ink, 0.72);
   {
-    const tmpl = `400 %spx "Inter", ui-sans-serif, sans-serif`;
+    const tmpl = `400 %spx ${canvasFonts().sans}`;
     const fit = fitFont(
       ctx,
       letterSpace(rec.artist.toUpperCase(), 4),
@@ -59,10 +51,9 @@ export function generateCoverCanvas(rec: DemoRecord, size = 1024): HTMLCanvasEle
 
   // corner metadata, inside the accent block
   ctx.fillStyle = withAlpha(rec.palette.bg, 0.92);
-  ctx.font = `400 ${Math.round(size * 0.024)}px "Inter", ui-sans-serif, sans-serif`;
+  ctx.font = `400 ${Math.round(size * 0.024)}px ${canvasFonts().sans}`;
   ctx.fillText(`${rec.year} · ${rec.label}`, size * 0.08, blockY + blockH * 0.32);
-  // country may be empty (collection endpoint omits it); skip the segment
-  // entirely rather than rendering a leading "  · GENRE".
+  // country is often empty, so don't render a dangling separator
   const subLine = [rec.country, rec.genre].filter((s) => s && s.trim() !== "").join(" · ");
   if (subLine) {
     ctx.fillText(letterSpace(subLine, 2), size * 0.08, blockY + blockH * 0.62);
@@ -78,19 +69,9 @@ export function generateCoverCanvas(rec: DemoRecord, size = 1024): HTMLCanvasEle
   return c;
 }
 
-// Procedurally rendered BACK cover. Looks like a tracklist on the rear
-// jacket: same palette as the front, but flipped color hierarchy, with a
-// numbered track list, side A/B headers, and a small label monogram.
-// A track as it appears on the back cover. `position` (e.g. "A1", "B3") is
-// optional — Discogs releases include it but our procedural fallback does
-// not. When present we split into sides by the first character of position;
-// otherwise we just split the list down the middle into Side A / Side B.
 export type BackTrack = { title: string; position?: string; duration?: string };
 
-// This is what the user sees when the record is spinning and the back
-// face rotates into view. Pass `realTracks` to render the actual tracklist
-// from Discogs; otherwise we generate a stable procedural list so the back
-// always reads like a real sleeve.
+// falls back to a stable fake tracklist so the back always reads like a sleeve
 export function generateBackCanvas(
   rec: DemoRecord,
   size = 1024,
@@ -105,22 +86,17 @@ export function generateBackCanvas(
   ctx.fillStyle = shade(rec.palette.bg, -0.08);
   ctx.fillRect(0, 0, size, size);
 
-  // soft inverted vignette so the corners feel a touch more lit (back of a
-  // matte sleeve is usually softer than the printed front)
   const grad = ctx.createRadialGradient(size * 0.5, size * 0.5, size * 0.2, size * 0.5, size * 0.5, size * 0.8);
   grad.addColorStop(0, withAlpha(rec.palette.accent, 0.10));
   grad.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
 
-  // top header — small caps artist + title. Both auto-shrink to fit the
-  // header width so a long artist or album name doesn't overflow off the
-  // jacket.
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
   ctx.fillStyle = withAlpha(rec.palette.ink, 0.85);
   {
-    const tmpl = `500 %spx "Inter", ui-sans-serif, sans-serif`;
+    const tmpl = `500 %spx ${canvasFonts().sans}`;
     const fit = fitFont(
       ctx,
       letterSpace(rec.artist.toUpperCase(), 4),
@@ -134,7 +110,7 @@ export function generateBackCanvas(
 
   ctx.fillStyle = rec.palette.ink;
   {
-    const tmpl = `italic 500 %spx "Fraunces", "Cormorant Garamond", serif`;
+    const tmpl = `italic 500 %spx ${canvasFonts().serif}`;
     const fit = fitFont(
       ctx,
       rec.title,
@@ -159,11 +135,7 @@ export function generateBackCanvas(
           .map((t) => ({ title: t }));
       })();
 
-  // Group tracks into columns. Single-disc LPs use "SIDE A / SIDE B"; box
-  // sets with positions like A/B/C/D/E/F... use one column per side, up
-  // to 4 columns. Anything beyond 4 sides gets compacted: tracks split
-  // into 4 evenly-sized columns labeled by their position range. This
-  // keeps a 60+ track box set legible without overflowing the jacket.
+  // one column per side; past 4 sides, compact into 4 even columns
   const hasPositions = tracks.every((t) => t.position && /^[A-Z]/.test(t.position));
   const MAX_COLS = 4;
   let groups: { label: string; tracks: BackTrack[] }[];
@@ -186,8 +158,6 @@ export function generateBackCanvas(
     ].filter((g) => g.tracks.length > 0);
   }
 
-  // Too many sides — compact into MAX_COLS evenly-sized columns and label
-  // each by the side-letter range it covers (e.g. "A–B", "C–D").
   if (groups.length > MAX_COLS) {
     const perCol = Math.ceil(tracks.length / MAX_COLS);
     const compacted: { label: string; tracks: BackTrack[] }[] = [];
@@ -204,18 +174,10 @@ export function generateBackCanvas(
     groups = compacted;
   }
 
-  // Layout: ONE ROW PER DISC, TWO COLUMNS PER ROW. Each cell holds exactly
-  // one full Group (one side), so SIDE A / SIDE B / SIDE C / SIDE D never
-  // share a column and order is preserved by reading rows left-to-right,
-  // top-to-bottom. 1 disc → 1×2, 2 discs → 2×2, 3 discs → 3×2, etc. This
-  // replaces the old col-major stacking layout where SIDE B could be
-  // forced to render below SIDE A in the same column while SIDE C and D
-  // sat in their own columns (the "B overlaps A's bottom" bug).
+  // one row per disc, two sides per row, so sides never share a column
   const nCols = Math.min(2, groups.length);
   const nRows = Math.ceil(groups.length / nCols);
 
-  // Row-major grid. Cells past the last group (e.g. an odd number of
-  // sides leaving one empty bottom-right cell) stay null and aren't drawn.
   const grid: ({ label: string; tracks: BackTrack[] } | null)[][] = [];
   for (let r = 0; r < nRows; r++) {
     const row: ({ label: string; tracks: BackTrack[] } | null)[] = [];
@@ -226,9 +188,6 @@ export function generateBackCanvas(
     grid.push(row);
   }
 
-  // Vertical bands: each disc gets a horizontal band, separated by a small
-  // gap. tracksBottomY is the hard stop above the metadata strip at the
-  // bottom of the jacket.
   const bandsTopY = size * 0.245;
   const tracksBottomY = size * 0.83;
   const rowGap = size * 0.035;
@@ -243,8 +202,6 @@ export function generateBackCanvas(
     nCols > 1 ? (safeWidth - size * gutterFrac) / 2 : safeWidth;
   const colX = (c: number) => safeLeft + c * (colW + size * gutterFrac);
 
-  // Side header (SIDE A / SIDE B / …) row inside each band, sitting just
-  // above the side's tracks.
   const sideHeaderPx = Math.max(
     Math.round(size * 0.018),
     Math.min(Math.round(size * 0.022), Math.round(colW * 0.07)),
@@ -252,9 +209,7 @@ export function generateBackCanvas(
   const sideHeaderGap = size * 0.025;
   const tracksAvailH = bandH - sideHeaderPx - sideHeaderGap;
 
-  // Line-spacing multiplier scales from cozy (≤14 tracks/side) to tight
-  // (≥28 tracks/side) so very dense sides can still fit without forcing
-  // the font down to nothing.
+  // tighten line spacing for dense sides before shrinking the font
   const maxTracksPerSide = Math.max(1, ...groups.map((g) => g.tracks.length));
   const denseN = Math.max(0, Math.min(1, (maxTracksPerSide - 14) / 14));
   const lineMul = 1.55 - denseN * 0.33;
@@ -262,20 +217,13 @@ export function generateBackCanvas(
   // Per-column horizontal geometry.
   const numW = Math.min(colW * 0.22, size * 0.06);
   const titleX = (c: number) => colX(c) + numW;
-  // titleMaxW depends on font size (durW scales with the row font), so it
-  // gets recomputed for each candidate font during the binary search.
   const titleMaxWFor = (fontPx: number) => {
     const durW = fontPx * 2.6;
     return colW - numW - fontPx * 0.5 - durW;
   };
 
-  // Word-wrap a title across as many lines as it needs at `fontPx`, never
-  // ellipsis-truncating. Single-word titles that still overflow are
-  // returned as a single line and will simply paint past the right edge
-  // (vanishingly rare in practice; the binary search picks a font that
-  // keeps even the longest title well under `maxW`).
   const wrapTitleAt = (title: string, fontPx: number, maxW: number): string[] => {
-    ctx.font = `400 ${fontPx}px "Inter", ui-sans-serif, sans-serif`;
+    ctx.font = `400 ${fontPx}px ${canvasFonts().sans}`;
     if (ctx.measureText(title).width <= maxW) return [title];
     const words = title.split(/\s+/).filter(Boolean);
     if (words.length <= 1) return [title];
@@ -306,11 +254,7 @@ export function generateBackCanvas(
     return n;
   };
 
-  // Binary-search the largest font size where EVERY side's wrapped line
-  // count still fits inside one band's tracksAvailH. Smaller fonts give a
-  // wider titleMaxW (durW shrinks linearly with the font), which produces
-  // fewer wraps, which lowers the total line count — the search is monotone
-  // so this terminates cleanly.
+  // largest font where every side still fits its band; line count is monotone in size
   const idealTrackPx = Math.round(size * 0.034);
   const minTrackPx = Math.max(6, Math.round(size * 0.008));
   const fitsAt = (fontPx: number) => {
@@ -340,10 +284,6 @@ export function generateBackCanvas(
   const lineH = trackPx * lineMul;
   const titleMaxW = titleMaxWFor(trackPx);
 
-  // Render each disc band: SIDE labels at top, then the side's tracks with
-  // word-wrapped titles. A hard band-bottom clip prevents the rare case
-  // where a single un-wrappable token would otherwise push a track past
-  // its band and overlap the band below.
   let absIdx = 0;
   for (let r = 0; r < nRows; r++) {
     const bandY = bandsTopY + r * (bandH + rowGap);
@@ -351,7 +291,7 @@ export function generateBackCanvas(
     const tracksStartY = bandY + sideHeaderPx + sideHeaderGap;
     const bandBottom = bandY + bandH;
 
-    ctx.font = `500 ${sideHeaderPx}px "Inter", ui-sans-serif, sans-serif`;
+    ctx.font = `500 ${sideHeaderPx}px ${canvasFonts().sans}`;
     ctx.fillStyle = withAlpha(rec.palette.ink, 0.6);
     for (let c = 0; c < nCols; c++) {
       const cell = grid[r][c];
@@ -364,26 +304,23 @@ export function generateBackCanvas(
       if (!cell) continue;
       const x = colX(c);
       let y = tracksStartY;
-      ctx.font = `400 ${trackPx}px "Inter", ui-sans-serif, sans-serif`;
+      ctx.font = `400 ${trackPx}px ${canvasFonts().sans}`;
       for (const t of cell.tracks) {
         const wrapped = wrapTitleAt(t.title, trackPx, titleMaxW);
-        // Clip guard: never start a track whose wrapped lines would spill
-        // past the band into the next disc's band below. The binary search
-        // above should keep this from triggering, but we keep the guard so
-        // a pathological un-wrappable title can never produce overlap.
+        // guard for unwrappable titles spilling into the next band
         if (y + wrapped.length * lineH > bandBottom + 1) break;
-        // position / fallback running index — drawn on the first wrap line.
+        // position / fallback running index, drawn on the first wrap line.
         ctx.fillStyle = withAlpha(rec.palette.ink, 0.55);
         const label = t.position ?? String(absIdx + 1).padStart(2, "0");
         ctx.fillText(label, x, y);
-        // duration — right-aligned on the first wrap line.
+        // duration, right-aligned on the first wrap line.
         if (t.duration) {
           ctx.textAlign = "right";
           ctx.fillStyle = withAlpha(rec.palette.ink, 0.5);
           ctx.fillText(t.duration, colX(c) + colW, y);
           ctx.textAlign = "left";
         }
-        // title — paints each wrapped line at trackX(c), one lineH apart.
+        // title, paints each wrapped line at trackX(c), one lineH apart.
         ctx.fillStyle = rec.palette.ink;
         for (let li = 0; li < wrapped.length; li++) {
           ctx.fillText(wrapped[li], titleX(c), y + li * lineH);
@@ -394,20 +331,12 @@ export function generateBackCanvas(
     }
   }
 
-  // bottom: a thin row of metadata. Auto-shrinks so a long label/genre
-  // string doesn't run into the STEREO tag at the right edge.
   const bottomY = size * 0.86;
   ctx.fillStyle = withAlpha(rec.palette.ink, 0.75);
   {
-    const tmpl = `500 %spx "Inter", ui-sans-serif, sans-serif`;
+    const tmpl = `500 %spx ${canvasFonts().sans}`;
     // leave room for the "33⅓ RPM · STEREO" tag on the right
     const maxMetaW = size * 0.5;
-    // Filter out empty segments so the metadata band reads as
-    // "LABEL · YEAR · GENRE" instead of "LABEL · YEAR ·  · GENRE"
-    // when country isn't known (real Discogs collection entries don't
-    // ship country in basic_information; we only get it on records
-    // the user has actively opened, which is when this back canvas
-    // gets regenerated with the enriched country).
     const metaSegments = [
       rec.label.toUpperCase(),
       String(rec.year),
@@ -441,8 +370,6 @@ export function generateBackCanvas(
   return c;
 }
 
-// Simple deterministic fake tracklist generator. Seeded by hash so each
-// record produces stable track names across renders.
 function makeFakeTracklist(seed: number, count: number): string[] {
   const a = [
     "Halcyon", "Saltwater", "Velvet Hour", "Static", "Margins", "Foxglove",
@@ -453,7 +380,7 @@ function makeFakeTracklist(seed: number, count: number): string[] {
   ];
   const b = [
     " in Blue", " Pt. II", " (Reprise)", "", " for Two", " (Demo)",
-    " at Midnight", "", " — Side A", "", " (Long Mix)", "",
+    " at Midnight", "", " (Side A)", "", " (Long Mix)", "",
   ];
   let s = Math.abs(seed) || 1;
   const next = () => {
@@ -476,19 +403,18 @@ function hashCode(s: string): number {
   return h;
 }
 
-// A vinyl SPINE — thin, tall. We render at width × height (≈ 1:36 aspect)
-// and rotate text 90° clockwise so it reads top→bottom on the standing record.
+// text is rotated 90 degrees so it reads top to bottom on a standing record
 export function generateSpineCanvas(rec: DemoRecord, width = 64, height = 2304): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = width;
   c.height = height;
   const ctx = c.getContext("2d")!;
 
-  // base — sampled from the record's bg, slightly desaturated for "in shadow on the shelf" feel
+  // base, sampled from the record's bg, slightly desaturated for "in shadow on the shelf" feel
   ctx.fillStyle = shade(rec.palette.bg, -0.04);
   ctx.fillRect(0, 0, width, height);
 
-  // cardboard "valley" — long gradient down the spine narrow axis
+  // cardboard "valley", long gradient down the spine narrow axis
   const grad = ctx.createLinearGradient(0, 0, width, 0);
   grad.addColorStop(0, "rgba(0,0,0,0.28)");
   grad.addColorStop(0.5, "rgba(0,0,0,0)");
@@ -506,14 +432,11 @@ export function generateSpineCanvas(rec: DemoRecord, width = 64, height = 2304):
   ctx.translate(width / 2, height / 2);
   ctx.rotate(Math.PI / 2);
 
-  // After rotation, "width" is the short dim (drawn vertically), "height" is long axis.
-  // Title — auto-shrinks font size before truncation so longer titles
-  // stay fully legible on the spine.
   ctx.fillStyle = rec.palette.ink;
   ctx.textBaseline = "middle";
   ctx.textAlign = "center";
   {
-    const tmpl = `italic 500 %spx "Fraunces", "Cormorant Garamond", "Times New Roman", serif`;
+    const tmpl = `italic 500 %spx ${canvasFonts().serif}`;
     const fit = fitFont(
       ctx,
       rec.title,
@@ -525,10 +448,10 @@ export function generateSpineCanvas(rec: DemoRecord, width = 64, height = 2304):
     ctx.fillText(fit.text, -height * 0.06, -width * 0.04);
   }
 
-  // Artist — also auto-shrinks
+  // Artist, also auto-shrinks
   ctx.fillStyle = withAlpha(rec.palette.ink, 0.78);
   {
-    const tmpl = `500 %spx "Inter", ui-sans-serif, sans-serif`;
+    const tmpl = `500 %spx ${canvasFonts().sans}`;
     const fit = fitFont(
       ctx,
       letterSpace(rec.artist.toUpperCase(), 2),
@@ -614,8 +537,6 @@ function letterSpace(text: string, px: number): string {
 // Shrink text by stepping font size down until it fits the target width.
 function fitToWidth(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
   let t = text;
-  // try simple truncation if still too wide at current font size
-  // (use ellipsis after truncating from the end)
   let w = ctx.measureText(t).width;
   if (w <= maxWidth) return t;
   // shrink string while measuring
@@ -626,10 +547,7 @@ function fitToWidth(ctx: CanvasRenderingContext2D, text: string, maxWidth: numbe
   return t.length < text.length ? t + "…" : t;
 }
 
-// Reduce font SIZE (not character count) until `text` fits within `maxWidth`.
-// `fontTemplate` is the css font string with "%s" where the size should go,
-// e.g. `italic 500 %spx "Fraunces", serif`. Returns the final font size used.
-// If even at minPx the text still doesn't fit, truncates with an ellipsis.
+// shrink the font before resorting to an ellipsis
 function fitFont(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -646,7 +564,7 @@ function fitFont(
     }
     size -= 1;
   }
-  // hit minimum size — truncate with ellipsis
+  // hit minimum size, truncate with ellipsis
   ctx.font = fontTemplate.replace("%s", String(minPx));
   return { size: minPx, text: fitToWidth(ctx, text, maxWidth) };
 }

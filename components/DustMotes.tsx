@@ -7,8 +7,7 @@ import type { PerformanceTier } from "@/lib/performance";
 
 const COUNT = 60;
 
-// the drift is slow enough that 30fps reads the same as 60, and halves the
-// per-frame matrix writes and instanceMatrix uploads
+// the drift is slow enough that 30fps reads the same as 60
 const DUST_UPDATE_INTERVAL = 1 / 30;
 
 export default function DustMotes({ tier = "high" }: { tier?: PerformanceTier }) {
