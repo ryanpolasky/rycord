@@ -1,4 +1,4 @@
-// short album blurb: wikipedia, then last.fm, then openrouter, cached per release
+// short album blurb: wikipedia, then openrouter, cached per release
 
 import { NextRequest, NextResponse } from "next/server";
 import { canonicalReleaseId, fetchReleaseDetails } from "@/lib/discogs";
@@ -8,7 +8,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const USER_AGENT = "rycord/0.1 +https://rycord.com";
-const LASTFM_BASE = "https://ws.audioscrobbler.com/2.0/";
 const WIKI_REST_BASE = "https://en.wikipedia.org/api/rest_v1/page/summary";
 const WIKI_API_BASE = "https://en.wikipedia.org/w/api.php";
 const DEFAULT_OPENROUTER_TIMEOUT_MS = 10_000;
@@ -62,17 +61,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       return null;
     });
     if (fromWiki) return NextResponse.json(await cacheDescription(cacheKey, releaseId, { artist, title, year, genre, label, country }, fromWiki));
-
-    const fromLastfm = process.env.LASTFM_API_KEY
-      ? await tryLastfm(cleanArtist, cleanTitle).catch((err) => {
-          console.warn(`[rycord/description] last.fm threw for ${where}:`, err);
-          return null;
-        })
-      : null;
-    if (fromLastfm) return NextResponse.json(await cacheDescription(cacheKey, releaseId, { artist, title, year, genre, label, country }, fromLastfm));
-    if (!process.env.LASTFM_API_KEY) {
-      console.warn(`[rycord/description] skipping last.fm for ${where}: LASTFM_API_KEY not set`);
-    }
   }
 
   if (hasNames && process.env.OPENROUTER_API_KEY) {
@@ -122,76 +110,6 @@ async function cacheDescription(
   };
   await writeJsonCache(file, "descriptions", `${cacheKey}.json`);
   return payload;
-}
-
-type LastfmAlbumInfo = {
-  album?: {
-    name?: string;
-    url?: string;
-    wiki?: {
-      content?: string;
-      summary?: string;
-    };
-  };
-  error?: number;
-};
-
-async function tryLastfm(artist: string, album: string): Promise<DescriptionPayload | null> {
-  const u = new URL(LASTFM_BASE);
-  u.searchParams.set("method", "album.getinfo");
-  u.searchParams.set("api_key", process.env.LASTFM_API_KEY ?? "");
-  u.searchParams.set("artist", artist);
-  u.searchParams.set("album", album);
-  u.searchParams.set("autocorrect", "1");
-  u.searchParams.set("format", "json");
-
-  const r = await fetch(u.toString(), {
-    headers: { "User-Agent": USER_AGENT },
-    cache: "no-store",
-  });
-  if (!r.ok) {
-    const body = await r.text().catch(() => "");
-    console.warn(`[rycord/description] last.fm ${r.status} for "${artist} - ${album}": ${body.slice(0, 200)}`);
-    return null;
-  }
-  const data: LastfmAlbumInfo = await r.json();
-  if (data.error) {
-    console.warn(`[rycord/description] last.fm error=${data.error} for "${artist} - ${album}"`);
-    return null;
-  }
-
-  // content is often the whole wikipedia article, summary is a sentence or two
-  const raw = data.album?.wiki?.summary ?? data.album?.wiki?.content ?? "";
-  const text = cleanLastfmText(raw);
-  if (text.length < 40) {
-    console.warn(`[rycord/description] last.fm wiki empty/short for "${artist} - ${album}" (${text.length} chars)`);
-    return null; // skip tiny/empty entries
-  }
-
-  return {
-    text,
-    source: "lastfm",
-    sourceUrl: data.album?.url ?? null,
-  };
-}
-
-function cleanLastfmText(raw: string): string {
-  // 1. Strip the "Read more on Last.fm" anchor + everything after it.
-  let s = raw.replace(/<a\s+href="https:\/\/www\.last\.fm[^>]*>.*?<\/a>\s*\.?/gis, "");
-  // 2. Strip the User-contributed CC-BY-SA suffix that Last.fm tacks on.
-  s = s.replace(/User-contributed text is available under[\s\S]*$/i, "");
-  // 3. drop any leftover html tags
-  s = s.replace(/<[^>]+>/g, "");
-  // 4. Decode the most common HTML entities by hand (no DOMParser server-side).
-  s = s
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
-  // 5. Trim trailing whitespace/punctuation noise.
-  return s.trim().replace(/\s+$/g, "").replace(/\s{2,}/g, " ");
 }
 
 type WikiSummary = {
