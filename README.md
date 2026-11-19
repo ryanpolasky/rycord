@@ -38,7 +38,6 @@ See `.env.example` for the full commented list.
 | `RYCORD_ADMIN_PASSWORD`     | no       | Password for hidden settings-cog admin tools |
 | `RYCORD_REFRESH_TOKEN`      | no       | Secret required for manual Discogs refreshes |
 | `RYCORD_DATA_DIR`           | no       | Cache root, defaults to `./data`             |
-| `LASTFM_API_KEY`            | no       | Description fallback after Wikipedia         |
 | `OPENROUTER_API_KEY`        | no       | Final AI fallback for album descriptions     |
 | `OPENROUTER_MODEL`          | no       | Comma-separated OpenRouter model chain       |
 | `MULTIPLY_RECORDS`          | no       | Dev-only shelf density test multiplier       |
@@ -53,15 +52,14 @@ needed cache file does not exist yet.
 | `data/collections/*.json`   | Normalized collection entries and raw Discogs rows         |
 | `data/hidden-releases.json` | Optional display blacklist of Discogs release IDs          |
 | `data/releases/*.json`      | Release metadata, notes, tracklist, durations, raw payload |
-| `data/descriptions/*.json`  | Wikipedia, Last.fm, or OpenRouter description payloads     |
+| `data/descriptions/*.json`  | Wikipedia or OpenRouter description payloads               |
 | `data/palettes/*.json`      | Derived cover palettes                                     |
 | `data/covers/*`             | Proxied cover image binaries and metadata                  |
 
 Description lookup order is:
 
 1. Wikipedia
-2. Last.fm
-3. OpenRouter
+2. OpenRouter
 
 Delete an individual cache file to force Rycord to fetch that item again.
 
@@ -144,7 +142,7 @@ app/
     collection/route.ts       Collection response, refresh, and prune endpoint
     cover/[id]/route.ts       Same-origin cached Discogs cover proxy
     release/[id]/route.ts     Cached release details and tracklists
-    description/[id]/route.ts Cached Wikipedia, Last.fm, OpenRouter descriptions
+    description/[id]/route.ts Cached Wikipedia, OpenRouter descriptions
 
 components/
   Scene.tsx                   R3F room, shelf layout, camera, post effects
