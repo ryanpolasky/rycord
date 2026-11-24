@@ -114,7 +114,7 @@ const jsonLd = {
         "Centerpiece turntable interaction",
         "In-scene remote controlling an addressable RGB LED strip",
         "Rainy-cafe ambient lighting and wood-grain room",
-        "Wikipedia, Last.fm, and OpenRouter-backed album descriptions",
+        "Wikipedia and OpenRouter-backed album descriptions",
       ],
       offers: {
         "@type": "Offer",
